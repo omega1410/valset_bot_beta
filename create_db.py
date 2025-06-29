@@ -3,6 +3,16 @@ import sqlite3
 conn = sqlite3.connect("data.db")
 c = conn.cursor()
 
+# создаёт таблицу whitelist
+c.execute(
+    """
+CREATE TABLE IF NOT EXISTS whitelist (
+    user_id INTEGER PRIMARY KEY
+)
+"""
+)
+
+# если таблица sections ещё не создана — создаёт и её
 c.execute(
     """
 CREATE TABLE IF NOT EXISTS sections (
@@ -15,5 +25,3 @@ CREATE TABLE IF NOT EXISTS sections (
 
 conn.commit()
 conn.close()
-
-print("таблица sections создана")

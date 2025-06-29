@@ -1,6 +1,6 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from whitelist import add_user_to_whitelist, is_user_allowed
+from utils.whitelist import add_user_to_whitelist, is_user_allowed
 from utils.menu import get_main_menu
 
 ADMIN_IDS = [5669245603]

@@ -12,7 +12,7 @@ for row in c.fetchall():
 # c.execute("UPDATE sections SET content = ? WHERE id = ?", ("новый текст", 2))
 
 # 🔴 удалить раздел с id=3
-#c.execute("DELETE FROM sections WHERE id = ?", (9,))
+# c.execute("DELETE FROM sections WHERE id = ?", (9,))
 
 conn.commit()
 conn.close()
