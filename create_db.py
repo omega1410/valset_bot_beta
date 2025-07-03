@@ -3,7 +3,6 @@ import sqlite3
 conn = sqlite3.connect("data.db")
 c = conn.cursor()
 
-# создаёт таблицу whitelist
 c.execute(
     """
 CREATE TABLE IF NOT EXISTS whitelist (
@@ -12,7 +11,6 @@ CREATE TABLE IF NOT EXISTS whitelist (
 """
 )
 
-# если таблица sections ещё не создана — создаёт и её
 c.execute(
     """
 CREATE TABLE IF NOT EXISTS sections (

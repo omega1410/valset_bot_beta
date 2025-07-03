@@ -1,43 +1,77 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import sqlite3
+import logging
 
-from db.database import is_user_allowed
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-ADMIN_IDS = [5669245603]  # замени на актуальные ID
+ADMIN_IDS = [5669245603]
 
-# временное хранилище для стадий ввода
+
 pending_titles = {}
 pending_contents = {}
 
-def register_section_handlers(app: Client):
-    @app.on_message(filters.command("add_section") & filters.user(ADMIN_IDS))
-    async def add_section(client: Client, message: Message):
-        await message.reply("Введи заголовок нового раздела:")
-        pending_titles[message.from_user.id] = True
 
+def validate_input(text: str, max_length: int = 1000) -> bool:
+    if not text.strip():
+        return False
+    if len(text) > max_length:
+        return False
+    return True
+
+
+def register_section_handlers(app: Client):
     @app.on_message(filters.text & filters.private)
     async def handle_section_input(client: Client, message: Message):
         user_id = message.from_user.id
 
-        # этап 1: ожидаем заголовок
-        if user_id in pending_titles and pending_titles[user_id] is True:
-            pending_titles[user_id] = message.text
-            await message.reply("Теперь введи содержание раздела:")
+        if user_id not in ADMIN_IDS:
+            logger.warning(f"Неавторизованный доступ: {user_id}")
             return
 
-        # этап 2: ожидаем текст
-        if user_id in pending_titles and user_id not in pending_contents:
-            title = pending_titles[user_id]
-            content = message.text
+        try:
+            if user_id in pending_titles and pending_titles[user_id] is True:
+                if not validate_input(message.text, 200):
+                    await message.reply(
+                        "Заголовок не должен быть пустым или слишком длинным (макс. 200 символов)"
+                    )
+                    return
 
-            # сохраняем в базу
-            conn = sqlite3.connect("data.db")
-            c = conn.cursor()
-            c.execute("INSERT INTO sections (title, content) VALUES (?, ?)", (title, content))
-            conn.commit()
-            conn.close()
+                pending_titles[user_id] = message.text.strip()
+                await message.reply("Теперь введи содержание раздела:")
+                logger.info(f"Пользователь {user_id} ввел заголовок: {message.text}")
+                return
 
-            # очистка
-            del pending_titles[user_id]
-            await message.reply("Раздел успешно сохранён ✅")
+            if user_id in pending_titles and user_id not in pending_contents:
+                if not validate_input(message.text):
+                    await message.reply("Содержание не должно быть пустым")
+                    return
+
+                title = pending_titles[user_id]
+                content = message.text.strip()
+
+                try:
+                    conn = sqlite3.connect("data.db")
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT INTO sections (title, content) VALUES (?, ?)",
+                        (title, content),
+                    )
+                    conn.commit()
+                    logger.info(f"Добавлен новый раздел: '{title}'")
+                except sqlite3.Error as e:
+                    logger.error(f"Ошибка БД: {e}")
+                    await message.reply("⚠️ Ошибка при сохранении раздела")
+                    raise
+                finally:
+                    conn.close()
+
+                del pending_titles[user_id]
+                await message.reply("Раздел успешно сохранён ✅")
+
+        except Exception as e:
+            logger.error(f"Ошибка в обработчике: {e}")
+            pending_titles.pop(user_id, None)
+            pending_contents.pop(user_id, None)
+            await message.reply("⚠️ Произошла ошибка. Попробуйте снова.")

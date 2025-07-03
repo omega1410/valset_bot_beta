@@ -21,3 +21,21 @@ def is_user_allowed(user_id: int) -> bool:
     result = c.fetchone()
     conn.close()
     return result is not None
+
+
+def remove_user_from_whitelist(user_id: int) -> bool:
+    conn = sqlite3.connect("data.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM whitelost WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_whitelist() -> list[int]:
+    conn = sqlite3.connect("data.db")
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM whitelist")
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]

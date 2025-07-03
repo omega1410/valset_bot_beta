@@ -2,7 +2,7 @@ import logging
 import os
 from pyrogram import Client
 from dotenv import load_dotenv
-from handlers import menu, access, sections
+from handlers import menu, access, sections, schedule, tests
 from db.database import init_db
 
 load_dotenv()
@@ -20,5 +20,7 @@ init_db()
 access.register_access_handlers(app)
 menu.register_menu_handlers(app)
 sections.register_section_handlers(app)
+schedule.register_schedule_handler(app)
+tests.register_test_handlers(app)
 
 app.run()

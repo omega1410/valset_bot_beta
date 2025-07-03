@@ -11,7 +11,7 @@ def is_user_allowed(user_id: int) -> bool:
 
 def add_user_to_whitelist(user_id: int) -> bool:
     if is_user_allowed(user_id):
-        return False  # уже есть
+        return False 
 
     with open(WHITELIST_FILE, "a") as f:
         f.write(f"{user_id}\n")
