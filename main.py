@@ -1,0 +1,54 @@
+import logging
+import os
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from dotenv import load_dotenv
+from handlers import menu, access, sections, tests, search
+from handlers.search import handle_search
+from db.database import init_db
+from utils.search_state import search_state
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not API_ID or not API_HASH or not BOT_TOKEN:
+    raise ValueError("API_ID, API_HASH and BOT_TOKEN must be set")
+
+app = Client(
+    "otel_bot",
+    api_id=int(API_ID),
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+)
+
+init_db()
+access.register_access_handlers(app)
+search.register_search_handlers(app)
+menu.register_menu_handlers(app)
+sections.register_section_handlers(app)
+tests.register_test_handlers(app)
+
+
+# Удалите общий обработчик handle_all_messages или модифицируйте его:
+@app.on_message(
+    filters.text
+    & filters.private
+    & ~filters.create(lambda _, __, m: m.from_user.id in search_state)
+)
+async def handle_regular_messages(client: Client, message: Message):
+    # Обработка обычных сообщений, не связанных с поиском
+    user_id = message.from_user.id
+    print(f"[DEBUG] Обычное сообщение от {user_id}: {message.text}")
+    # ... остальная логика ...
+
+    if search_state.has(user_id):
+        print(f"[DEBUG main] user {user_id} is in search_state, calling handle_search")
+        await handle_search(client, message)
+        return
+
+
+app.run()
