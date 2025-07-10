@@ -6,9 +6,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ADMIN_IDS = [5669245603]
+ADMIN_IDS = [5669245603, 551125461, 655805086]
 
-# словари для хранения состояния ожидания ввода
 pending_titles = {}
 pending_contents = {}
 
@@ -22,17 +21,15 @@ def validate_input(text: str, max_length: int = 1000) -> bool:
 
 
 def register_section_handlers(app: Client):
-    # команда /add_section - начинает процесс добавления раздела
     @app.on_message(filters.command("add_section") & filters.private)
     async def start_add_section(client: Client, message: Message):
         user_id = message.from_user.id
         if user_id not in ADMIN_IDS:
             await message.reply("У тебя нет доступа к этой команде")
             return
-        pending_titles[user_id] = True  # ждем заголовок
+        pending_titles[user_id] = True
         await message.reply("✅ Введи заголовок раздела:")
 
-    # обработка ввода заголовка и содержания
     @app.on_message(filters.text & filters.private)
     async def handle_section_input(client: Client, message: Message):
         user_id = message.from_user.id
@@ -41,7 +38,6 @@ def register_section_handlers(app: Client):
             return
 
         try:
-            # ожидаем заголовок
             if user_id in pending_titles and pending_titles[user_id] is True:
                 title = message.text.strip()
                 if not validate_input(title, 200):
@@ -50,12 +46,11 @@ def register_section_handlers(app: Client):
                     )
                     return
                 pending_titles[user_id] = title
-                pending_contents[user_id] = True  # теперь ждём содержание
+                pending_contents[user_id] = True
                 await message.reply("Теперь введи содержание раздела:")
                 logger.info(f"Пользователь {user_id} ввел заголовок: {title}")
                 return
 
-            # ожидаем содержание
             if user_id in pending_contents and pending_contents[user_id] is True:
                 content = message.text.strip()
                 if not validate_input(content, 5000):
@@ -69,7 +64,6 @@ def register_section_handlers(app: Client):
                     pending_contents.pop(user_id, None)
                     return
 
-                # сохраняем в базу
                 try:
                     conn = sqlite3.connect("data.db")
                     c = conn.cursor()
@@ -86,7 +80,6 @@ def register_section_handlers(app: Client):
                 finally:
                     conn.close()
 
-                # очистка состояний
                 pending_titles.pop(user_id, None)
                 pending_contents.pop(user_id, None)
 

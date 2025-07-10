@@ -1,6 +1,13 @@
-from pyrogram.client import Client
-from pyrogram import filters
-from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import Client, filters
+from pyrogram.types import (
+    CallbackQuery,
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+from db.statistics import get_user_stats
+import sqlite3
+import asyncio
 
 tests = {
     1: [
@@ -111,6 +118,22 @@ tests = {
             "correct_index": 1,
         },
     ],
+    6: [
+        {
+            "question": "Какой номер PM обычно используют для GRAB&GO в 3 корпусе?",
+            "options": ["29009", "29020", "30001"],
+            "correct_index": 1,
+        },
+        {
+            "question": "Для чего в основном создают PM в системе бронирования?",
+            "options": [
+                "Для оформления новых гостей",
+                "Для обработки ежедневных оплат",
+                "Для бронирования конференц-залов",
+            ],
+            "correct_index": 1,
+        },
+    ],
     8: [
         {
             "question": "Какое первое действие при отказе гостя от номера?",
@@ -140,6 +163,44 @@ tests = {
             "correct_index": 0,
         },
     ],
+    9: [
+        {
+            "question": "Где гости могут взять таблетки для посудомоечной машины?",
+            "options": [
+                "В ближайшем магазине",
+                "На ресепшене (50 рублей / штука)",
+                "Предоставляются бесплатно",
+            ],
+            "correct_index": 1,
+        },
+        {
+            "question": "В каком корпусе находится бесплатная финская сауна для гостей?",
+            "options": [
+                "В корпусе Центр",
+                "В корпусе Freestyle",
+                "В спа-комплексе Mountain Spa",
+            ],
+            "correct_index": 1,
+        },
+        {
+            "question": "До какого времени работает детская комната?",
+            "options": [
+                "До 20:00",
+                "До 22:00",
+                "До 18:00",
+            ],
+            "correct_index": 0,
+        },
+        {
+            "question": "Как часто производится уборка в номерах корпуса Центр?",
+            "options": [
+                "По графику",
+                "Раз в три дня",
+                "Ежедневно",
+            ],
+            "correct_index": 2,
+        },
+    ],
     12: [
         {
             "question": "Что нужно сделать в первую очередь при запросе гостя на переезд?",
@@ -149,7 +210,6 @@ tests = {
                 "Выписать новые ключи",
             ],
             "correct_index": 1,
-            "explanation": "Первым делом необходимо сообщить в рабочий чат: имя гостя, текущий номер и причину переезда.",
         },
         {
             "question": "Какие действия выполняются при одобренном переезде?",
@@ -159,114 +219,255 @@ tests = {
                 "Только внесение Fixed Charges",
             ],
             "correct_index": 1,
-            "explanation": "При одобренном переезде необходимо выполнить Room Move в Опере и перевыпустить ключи.",
         },
+    ],
+    16: [
+        {
+            "question": "В каком типе апартаментов есть балкон во всех номерах?",
+            "options": [
+                "APA",
+                "APABL",
+                "AP2A",
+            ],
+            "correct_index": 1,
+        },
+        {
+            "question": "Где можно разместить дополнительного гостя на раскладном диване?",
+            "options": [
+                "APA и APABL",
+                "APPSA и APABL",
+                "APKA и AP2A",
+            ],
+            "correct_index": 2,
+        },
+        {
+            "question": "В каких апартаментах есть камин?",
+            "options": [
+                "APPSA",
+                "APABL",
+                "APKA",
+            ],
+            "correct_index": 0,
+        },
+    ],
+    17: [
+        {
+            "question": "В каких апартаментах стандартно предусмотрен двуспальный диван?",
+            "options": [
+                "Только в AP4C",
+                "Во всех, кроме APC",
+                "Только в APCL и AP2C",
+            ],
+            "correct_index": 1,
+        },
+        {
+            "question": "Сколько человек комфортно разместятся в AP2C?",
+            "options": [
+                "5 человек",
+                "4 человека",
+                "3 человека",
+            ],
+            "correct_index": 2,
+        },
+    ],
+    18: [
+        {
+            "question": "В каких апартаментах есть два балкона и вид на озеро?",
+            "options": [
+                "APKDBV",
+                "APD", 
+                "APDX"
+            ],
+            "correct_index": 0,
+        },
+        {
+            "question": "В каких апартаментах балкон есть во всех номерах категории?",
+            "options": [
+                "APD",
+                "APKD",
+                "APDX"
+            ],
+            "correct_index": 2,
+        },
+        {
+            "question": "Какая категория самая большая по площади?",
+            "options": [
+                "APKD",
+                "APKDX",
+                "APDX"
+            ],
+            "correct_index": 1,
+        }
     ],
 }
 
-test_state = {}  # user_id → (section_id, current_q_index, correct_count)
-test_messages = {}  # user_id → [message_id1, message_id2, ...]
+test_state = {}
+test_messages = {}
 
 
 def register_test_handlers(app: Client):
     @app.on_callback_query(filters.regex(r"^start_test_(\d+)$"), group=2)
     async def start_test(client: Client, callback_query: CallbackQuery):
         user_id = callback_query.from_user.id
-        section_id = int(callback_query.data.split("_")[2])
-        print(f"[test] пользователь {user_id} начал тест по разделу {section_id}")
+        try:
+            section_id = int(callback_query.data.split("_")[2])
+            print(f"[test] пользователь {user_id} начал тест по разделу {section_id}")
 
-        if section_id not in tests:
-            await callback_query.message.edit_text("Тест не найден.")
-            return
+            if section_id not in tests:
+                await callback_query.message.edit_text("Тест не найден.")
+                return
+            test_state[user_id] = (section_id, 0, 0)
+            test_messages[user_id] = []
 
-        test_state[user_id] = (section_id, 0, 0)
-        test_messages[user_id] = []  # инициализация списка сообщений
-
-        await callback_query.message.delete()
-        await send_question(client, callback_query.message.chat.id, user_id)
+            await callback_query.message.delete()
+            await send_question(client, callback_query.message.chat.id, user_id)
+        except Exception as e:
+            print(f"[ОШИБКА] в start_test: {e}")
+            await callback_query.answer("Произошла ошибка", show_alert=True)
 
     @app.on_callback_query(filters.regex(r"^answer_(\d+)_(\d+)$"), group=2)
     async def handle_answer(client: Client, callback_query: CallbackQuery):
         user_id = callback_query.from_user.id
-        section_id, current_q, correct = test_state.get(user_id, (None, None, None))
+        try:
+            section_id, current_q, correct = test_state.get(user_id, (None, None, None))
 
-        if section_id is None:
-            await callback_query.answer("Ошибка состояния.")
-            return
+            if section_id is None:
+                await callback_query.answer("Ошибка состояния.")
+                return
 
-        selected = int(callback_query.data.split("_")[2])
-        if selected == tests[section_id][current_q]["correct_index"]:
-            correct += 1
-        current_q += 1
+            selected = int(callback_query.data.split("_")[2])
+            if selected == tests[section_id][current_q]["correct_index"]:
+                correct += 1
+            current_q += 1
 
-        if current_q >= len(tests[section_id]):
-            # Сначала отправляем результат
-            result_msg = await callback_query.message.edit_text(
-                f"✅ Тест завершён!\nПравильных ответов: {correct} из {len(tests[section_id])}",
-                reply_markup=InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                "🔁 Пройти заново",
-                                callback_data=f"start_test_{section_id}",
-                            )
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                "🔙 Назад", callback_data="open_section_menu"
-                            )
-                        ],
-                    ]
-                ),
-            )
+            if current_q >= len(tests[section_id]):
+                await save_test_stats(
+                    user_id, section_id, correct, len(tests[section_id])
+                )
 
-            # Добавляем небольшую задержку перед удалением
-            import asyncio
+                await show_test_results(client, callback_query, section_id, correct)
 
-            await asyncio.sleep(1)
+                await cleanup_test_messages(
+                    client, callback_query.message.chat.id, user_id
+                )
 
-            # Удаляем все предыдущие сообщения с вопросами, кроме последнего
-            if user_id in test_messages and len(test_messages[user_id]) > 1:
-                for msg_id in test_messages[user_id][:-1]:
-                    try:
-                        await client.delete_messages(
-                            callback_query.message.chat.id, msg_id
-                        )
-                    except Exception as e:
-                        print(f"[ошибка удаления] {user_id}: {e}")
+                test_state.pop(user_id, None)
+                test_messages.pop(user_id, None)
+            else:
+                test_state[user_id] = (section_id, current_q, correct)
+                await send_question(client, callback_query.message.chat.id, user_id)
 
-            # Очищаем состояние
-            test_state.pop(user_id, None)
-            test_messages.pop(user_id, None)
-        else:
-            test_state[user_id] = (section_id, current_q, correct)
-            await send_question(client, callback_query.message.chat.id, user_id)
+            await callback_query.answer()
+        except Exception as e:
+            print(f"[ОШИБКА] в handle_answer: {e}")
+            await callback_query.answer("Произошла ошибка", show_alert=True)
 
-        await callback_query.answer()
+    @app.on_message(filters.command("stats") & filters.private)
+    async def show_stats(client: Client, message: Message):
+        try:
+            user_id = message.from_user.id
+            print(f"[DEBUG] Обработка /stats для {user_id}")
+
+            stats = get_user_stats(user_id)
+            print(f"[DEBUG] Данные из БД: {stats}")
+
+            if not stats:
+                await message.reply("📊 У вас пока нет статистики по тестам.")
+                return
+
+            lines = ["📊 Ваша статистика:"]
+            for section_id, correct, total in stats:
+                accuracy = round(correct / total * 100) if total else 0
+                lines.append(f"• Раздел {section_id}: {correct}/{total} ({accuracy}%)")
+
+            await message.reply("\n".join(lines))
+
+        except Exception as e:
+            import traceback
+
+            print(f"[CRITICAL] Ошибка в show_stats: {e}\n{traceback.format_exc()}")
+            await message.reply("❌ Произошла внутренняя ошибка. Попробуйте позже.")
 
 
 async def send_question(client: Client, chat_id: int, user_id: int):
-    section_id, q_index, _ = test_state[user_id]
-    question_data = tests[section_id][q_index]
-    question = question_data["question"]
-    options = question_data["options"]
+    try:
+        section_id, q_index, _ = test_state[user_id]
+        question_data = tests[section_id][q_index]
+        question = question_data["question"]
+        options = question_data["options"]
 
-    keyboard = [
-        [InlineKeyboardButton(opt, callback_data=f"answer_{section_id}_{i}")]
-        for i, opt in enumerate(options)
-    ]
+        keyboard = [
+            [InlineKeyboardButton(opt, callback_data=f"answer_{section_id}_{i}")]
+            for i, opt in enumerate(options)
+        ]
 
-    sent = await client.send_message(
-        chat_id,
-        f"❓ Вопрос {q_index+1}/{len(tests[section_id])}\n\n{question}",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-    # сохраняем ID вопроса
-    if user_id in test_messages:
+        sent = await client.send_message(
+            chat_id, f"❓ {question}", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         test_messages[user_id].append(sent.id)
-    else:
-        test_messages[user_id] = [sent.id]
+    except Exception as e:
+        print(f"[ОШИБКА] в send_question: {e}")
+        raise
+
+
+async def save_test_stats(user_id: int, section_id: int, correct: int, total: int):
+    try:
+        conn = sqlite3.connect("db/data.db")
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT INTO test_stats (user_id, section_id, correct, total)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, section_id) DO UPDATE SET
+                correct = excluded.correct,
+                total = excluded.total
+            """,
+            (user_id, section_id, correct, total),
+        )
+        conn.commit()
+        conn.close()
+        print(f"[СТАТИСТИКА] Записан результат: user={user_id}, correct={correct}")
+    except Exception as e:
+        print(f"[ОШИБКА] Не удалось сохранить статистику: {e}")
+
+
+async def show_test_results(
+    client: Client, callback_query: CallbackQuery, section_id: int, correct: int
+):
+    try:
+        await callback_query.message.edit_text(
+            f"✅ Тест завершён!\nПравильных ответов: {correct} из {len(tests[section_id])}",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔁 Пройти заново",
+                            callback_data=f"start_test_{section_id}",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "🔙 Назад", callback_data="open_section_menu"
+                        )
+                    ],
+                ]
+            ),
+        )
+    except Exception as e:
+        print(f"[ОШИБКА] при показе результатов: {e}")
+
+
+async def cleanup_test_messages(client: Client, chat_id: int, user_id: int):
+    try:
+        if user_id in test_messages:
+            await asyncio.sleep(1)
+            for msg_id in test_messages[user_id][:-1]:
+                try:
+                    await client.delete_messages(chat_id, msg_id)
+                except Exception as e:
+                    print(f"[ошибка удаления] {user_id}: {e}")
+    except Exception as e:
+        print(f"[ОШИБКА] при очистке сообщений: {e}")
 
 
 def generate_test_button(section_id: int):
@@ -279,3 +480,24 @@ def generate_test_button(section_id: int):
             ]
         ]
     )
+
+
+def get_user_stats(user_id: int):
+    try:
+        conn = sqlite3.connect("db/data.db")
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT section_id, correct, total 
+            FROM test_stats 
+            WHERE user_id = ?
+            ORDER BY section_id
+        """,
+            (user_id,),
+        )
+        stats = c.fetchall()
+        conn.close()
+        return stats
+    except Exception as e:
+        print(f"[ОШИБКА] при получении статистики: {e}")
+        return None

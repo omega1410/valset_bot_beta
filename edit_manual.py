@@ -7,10 +7,10 @@ c.execute("SELECT id, title FROM sections")
 for row in c.fetchall():
     print(row)
 
-# 🟢 изменить текст раздела с id=2
+# 🟢 изменить текст
 # c.execute("UPDATE sections SET content = ? WHERE id = ?", ("", 22))
 
-# 🔴 удалить раздел с id=3
+# 🔴 удалить раздел
 # c.execute("DELETE FROM sections WHERE id = ?", (20,))
 
 conn.commit()

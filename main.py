@@ -3,10 +3,11 @@ import os
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from dotenv import load_dotenv
-from handlers import menu, access, sections, tests, search
+from handlers import menu, access, sections, tests, search, news
 from handlers.search import handle_search
 from db.database import init_db
 from utils.search_state import search_state
+from config import ADMIN_IDS
 
 load_dotenv()
 
@@ -27,23 +28,21 @@ app = Client(
 
 init_db()
 access.register_access_handlers(app)
+tests.register_test_handlers(app)
 search.register_search_handlers(app)
+news.register_news_handlers(app)
 menu.register_menu_handlers(app)
 sections.register_section_handlers(app)
-tests.register_test_handlers(app)
 
 
-# Удалите общий обработчик handle_all_messages или модифицируйте его:
 @app.on_message(
     filters.text
     & filters.private
     & ~filters.create(lambda _, __, m: m.from_user.id in search_state)
 )
 async def handle_regular_messages(client: Client, message: Message):
-    # Обработка обычных сообщений, не связанных с поиском
     user_id = message.from_user.id
     print(f"[DEBUG] Обычное сообщение от {user_id}: {message.text}")
-    # ... остальная логика ...
 
     if search_state.has(user_id):
         print(f"[DEBUG main] user {user_id} is in search_state, calling handle_search")
