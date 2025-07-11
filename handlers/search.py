@@ -10,7 +10,7 @@ from utils.search_state import search_state
 
 
 def register_search_handlers(app: Client):
-    @app.on_callback_query(filters.regex("^start_search$"), group=0)
+    @app.on_callback_query(filters.regex("^start_search$"), group=30)
     async def start_search(client: Client, callback_query: CallbackQuery):
         user_id = callback_query.from_user.id
         search_state.add(user_id)

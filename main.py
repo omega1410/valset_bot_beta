@@ -43,8 +43,8 @@ init_db()
 access.register_access_handlers(app)
 tests.register_test_handlers(app)
 search.register_search_handlers(app)
-sections.register_section_handlers(app)
 news.register_news_handlers(app)
+sections.register_section_handlers(app)
 menu.register_menu_handlers(app)
 
 
