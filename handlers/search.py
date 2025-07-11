@@ -10,7 +10,7 @@ from utils.search_state import search_state
 
 
 def register_search_handlers(app: Client):
-    @app.on_callback_query(filters.regex("^start_search$"))
+    @app.on_callback_query(filters.regex("^start_search$"), group=0)
     async def start_search(client: Client, callback_query: CallbackQuery):
         user_id = callback_query.from_user.id
         search_state.add(user_id)
@@ -22,7 +22,8 @@ def register_search_handlers(app: Client):
     @app.on_message(
         filters.text
         & filters.private
-        & filters.create(lambda _, __, m: m.from_user.id in search_state)
+        & filters.create(lambda _, __, m: m.from_user.id in search_state),
+        group=2
     )
     async def search_handler(client: Client, message: Message):
         await handle_search(client, message)

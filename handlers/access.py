@@ -22,7 +22,7 @@ def register_access_handlers(app: Client):
     # Фильтр для админов
     admin_filter = filters.create(lambda _, __, m: is_admin(m.from_user.id))
 
-    @app.on_message(filters.command("start"))
+    @app.on_message(filters.command("start") & filters.private, group=0)
     async def start(client: Client, message: Message):
         user_id = message.from_user.id
         if not is_user_allowed(user_id):
@@ -36,7 +36,7 @@ def register_access_handlers(app: Client):
         logger.info(f"Пользователь {name} (ID: {user_id}) успешно авторизовался")
         await message.reply(f"👋 Привет, {name}!\n\n{text}", reply_markup=keyboard)
 
-    @app.on_message(filters.command("add") & admin_filter)
+    @app.on_message(filters.command("add") & admin_filter, group=0)
     async def add_user(client: Client, message: Message):
         try:
             user_id = int(message.command[1])
@@ -49,7 +49,7 @@ def register_access_handlers(app: Client):
         except (IndexError, ValueError):
             await message.reply("ℹ️ Использование: /add <ID_пользователя>")
 
-    @app.on_message(filters.command("remove") & admin_filter)
+    @app.on_message(filters.command("remove") & admin_filter, group=0)
     async def remove_user(client: Client, message: Message):
         try:
             user_id = int(message.command[1])
@@ -60,7 +60,7 @@ def register_access_handlers(app: Client):
         except (IndexError, ValueError):
             await message.reply("ℹ️ Использование: /remove <ID_пользователя>")
 
-    @app.on_message(filters.command("list") & admin_filter)
+    @app.on_message(filters.command("list") & admin_filter, group=0)
     async def list_users(client: Client, message: Message):
         try:
             users = get_complete_users_list()

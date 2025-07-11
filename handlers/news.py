@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_news_handlers(app: Client):
-    @app.on_message(filters.command("news") & filters.private)
+    @app.on_message(filters.command("news") & filters.private, group=3)
     async def start_news(client: Client, message: Message):
         if message.from_user.id not in ADMIN_IDS:
             await message.reply("⛔️ Доступ запрещён.")
@@ -18,7 +18,7 @@ def register_news_handlers(app: Client):
         await message.reply(f"✍️ Введите текст рассылки:")
         news_state.add(message.from_user.id)
 
-    @app.on_message(filters.text & filters.private)
+    @app.on_message(filters.text & filters.private, group=2)
     async def handle_news_text(client: Client, message: Message):
         user_id = message.from_user.id
         if not news_state.has(user_id):

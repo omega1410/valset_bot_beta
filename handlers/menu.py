@@ -7,7 +7,7 @@ from utils.search_state import search_state
 
 
 def register_menu_handlers(app: Client):
-    @app.on_callback_query()
+    @app.on_callback_query(group=10)
     async def handle_callback(client: Client, callback_query: CallbackQuery):
         data = callback_query.data
         user_id = callback_query.from_user.id

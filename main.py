@@ -30,9 +30,9 @@ init_db()
 access.register_access_handlers(app)
 tests.register_test_handlers(app)
 search.register_search_handlers(app)
+sections.register_section_handlers(app)
 news.register_news_handlers(app)
 menu.register_menu_handlers(app)
-sections.register_section_handlers(app)
 
 
 @app.on_message(
@@ -44,7 +44,7 @@ async def handle_regular_messages(client: Client, message: Message):
     user_id = message.from_user.id
     print(f"[DEBUG] Обычное сообщение от {user_id}: {message.text}")
 
-    if search_state.has(user_id):
+    if user_id in search_state:
         print(f"[DEBUG main] user {user_id} is in search_state, calling handle_search")
         await handle_search(client, message)
         return

@@ -362,7 +362,7 @@ def register_test_handlers(app: Client):
             print(f"[ОШИБКА] в handle_answer: {e}")
             await callback_query.answer("Произошла ошибка", show_alert=True)
 
-    @app.on_message(filters.command("stats") & filters.private)
+    @app.on_message(filters.command("stats") & filters.private, group=1)
     async def show_stats(client: Client, message: Message):
         try:
             user_id = message.from_user.id

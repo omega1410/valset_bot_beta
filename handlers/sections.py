@@ -2,6 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 import sqlite3
 import logging
+from config import ADMIN_IDS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,16 +22,17 @@ def validate_input(text: str, max_length: int = 1000) -> bool:
 
 
 def register_section_handlers(app: Client):
-    @app.on_message(filters.command("add_section") & filters.private)
+    @app.on_message(filters.command("add_section") & filters.private, group=1)
     async def start_add_section(client: Client, message: Message):
         user_id = message.from_user.id
+        print(f"Command received from {user_id}, ADMIN_IDS: {ADMIN_IDS}")  # Debug
         if user_id not in ADMIN_IDS:
             await message.reply("У тебя нет доступа к этой команде")
             return
         pending_titles[user_id] = True
         await message.reply("✅ Введи заголовок раздела:")
 
-    @app.on_message(filters.text & filters.private)
+    @app.on_message(filters.text & filters.private, group=1)
     async def handle_section_input(client: Client, message: Message):
         user_id = message.from_user.id
         if user_id not in ADMIN_IDS:
