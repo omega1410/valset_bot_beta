@@ -11,29 +11,24 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = "data.db"
 
-# Жёстко заданные ID администраторов
 HARDCODED_ADMINS = {
-    5669245603,  # Ваш текущий ID
-    551125461,  # Другой текущий админ
-    655805086,  
-    # Добавляйте новые ID админов здесь
+    5669245603,
+    551125461,
+    655805086,
 }
 
 
 def get_db_connection():
-    """Создает и возвращает соединение с БД"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def is_admin(user_id: int) -> bool:
-    """Проверяет, является ли пользователь админом"""
     return user_id in HARDCODED_ADMINS
 
 
 def add_user_to_whitelist(user_id: int) -> bool:
-    """Добавляет обычного пользователя в whitelist"""
     if is_admin(user_id):
         logger.warning(f"Попытка добавить админа {user_id} через whitelist")
         return False
@@ -55,7 +50,6 @@ def add_user_to_whitelist(user_id: int) -> bool:
 
 
 def remove_user_from_whitelist(user_id: int) -> bool:
-    """Удаляет пользователя из whitelist"""
     if is_admin(user_id):
         logger.warning(f"Попытка удалить админа {user_id} из whitelist")
         return False
@@ -75,7 +69,6 @@ def remove_user_from_whitelist(user_id: int) -> bool:
 
 
 def is_user_in_whitelist(user_id: int) -> bool:
-    """Проверяет наличие пользователя в whitelist"""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -87,14 +80,12 @@ def is_user_in_whitelist(user_id: int) -> bool:
 
 
 def is_user_allowed(user_id: int) -> bool:
-    """Проверяет, имеет ли пользователь доступ"""
     allowed = is_admin(user_id) or is_user_in_whitelist(user_id)
     logger.info(f"Авторизация: {'УСПЕШНО' if allowed else 'ОТКАЗАНО'} для {user_id}")
     return allowed
 
 
 def get_whitelist_users() -> List[int]:
-    """Возвращает список ID пользователей в whitelist"""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -106,7 +97,6 @@ def get_whitelist_users() -> List[int]:
 
 
 def get_complete_users_list() -> List[Dict[str, Any]]:
-    """Возвращает список всех пользователей с их статусами"""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()

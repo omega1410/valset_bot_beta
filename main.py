@@ -8,10 +8,23 @@ from handlers.search import handle_search
 from db.database import init_db
 from utils.search_state import search_state
 from config import ADMIN_IDS
+from flask import Flask
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
+
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
+def home():
+    return "Telegram Bot is running!"
+
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=10000)
+
 
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
@@ -50,4 +63,9 @@ async def handle_regular_messages(client: Client, message: Message):
         return
 
 
-app.run()
+if __name__ == "__main__":
+    import threading
+
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    app.run()

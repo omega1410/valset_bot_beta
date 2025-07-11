@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 def register_access_handlers(app: Client):
-    # Фильтр для админов
     admin_filter = filters.create(lambda _, __, m: is_admin(m.from_user.id))
 
     @app.on_message(filters.command("start") & filters.private, group=0)
@@ -68,7 +67,6 @@ def register_access_handlers(app: Client):
                 await message.reply("📭 Список пользователей пуст")
                 return
 
-            # Получаем информацию о пользователях
             users_info: List[Dict[str, Any]] = []
             for user in users:
                 try:
@@ -97,7 +95,6 @@ def register_access_handlers(app: Client):
                         }
                     )
 
-            # Сортируем: сначала админы, потом по ID
             users_info.sort(key=lambda x: (-x["is_admin"], x["id"]))
 
             response = "📋 Список пользователей:\n\n"
@@ -110,7 +107,6 @@ def register_access_handlers(app: Client):
                 )
                 response += f"{user_type}: {user['name']} (ID: {user['id']}){whitelist_status}\n"
 
-            # Разбиваем длинные сообщения
             for i in range(0, len(response), 4096):
                 await message.reply(response[i : i + 4096])
 

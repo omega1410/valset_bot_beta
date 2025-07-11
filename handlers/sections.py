@@ -25,7 +25,7 @@ def register_section_handlers(app: Client):
     @app.on_message(filters.command("add_section") & filters.private, group=1)
     async def start_add_section(client: Client, message: Message):
         user_id = message.from_user.id
-        print(f"Command received from {user_id}, ADMIN_IDS: {ADMIN_IDS}")  # Debug
+        print(f"Command received from {user_id}, ADMIN_IDS: {ADMIN_IDS}")
         if user_id not in ADMIN_IDS:
             await message.reply("У тебя нет доступа к этой команде")
             return
