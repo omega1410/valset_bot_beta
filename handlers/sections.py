@@ -52,7 +52,7 @@ def register_section_handlers(app: Client):
 
         if user_id in pending_contents and pending_contents[user_id] is True:
             content = message.text.strip()
-            if not validate_input(content, 5000):
+            if not validate_input(content, 8000):
                 await message.reply("❌ Содержание пустое или слишком длинное")
                 return
 
@@ -139,7 +139,7 @@ def register_section_handlers(app: Client):
         # шаг 3: ввод нового содержания
         if isinstance(pending_edit_title.get(user_id), str):
             content = message.text.strip()
-            if not validate_input(content, 5000):
+            if not validate_input(content, 8000):
                 await message.reply("❌ Содержание пустое или слишком длинное")
                 return
 
