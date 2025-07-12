@@ -163,7 +163,7 @@ tests = {
             "correct_index": 0,
         },
     ],
-    9: [
+    21: [
         {
             "question": "Где гости могут взять таблетки для посудомоечной машины?",
             "options": [
@@ -201,7 +201,7 @@ tests = {
             "correct_index": 2,
         },
     ],
-    12: [
+    9: [
         {
             "question": "Что нужно сделать в первую очередь при запросе гостя на переезд?",
             "options": [
@@ -221,7 +221,7 @@ tests = {
             "correct_index": 1,
         },
     ],
-    16: [
+    24: [
         {
             "question": "В каком типе апартаментов есть балкон во всех номерах?",
             "options": [
@@ -250,7 +250,7 @@ tests = {
             "correct_index": 0,
         },
     ],
-    17: [
+    25: [
         {
             "question": "В каких апартаментах стандартно предусмотрен двуспальный диван?",
             "options": [
@@ -270,34 +270,22 @@ tests = {
             "correct_index": 2,
         },
     ],
-    18: [
+    26: [
         {
             "question": "В каких апартаментах есть два балкона и вид на озеро?",
-            "options": [
-                "APKDBV",
-                "APD", 
-                "APDX"
-            ],
+            "options": ["APKDBV", "APD", "APDX"],
             "correct_index": 0,
         },
         {
             "question": "В каких апартаментах балкон есть во всех номерах категории?",
-            "options": [
-                "APD",
-                "APKD",
-                "APDX"
-            ],
+            "options": ["APD", "APKD", "APDX"],
             "correct_index": 2,
         },
         {
             "question": "Какая категория самая большая по площади?",
-            "options": [
-                "APKD",
-                "APKDX",
-                "APDX"
-            ],
+            "options": ["APKD", "APKDX", "APDX"],
             "correct_index": 1,
-        }
+        },
     ],
 }
 
