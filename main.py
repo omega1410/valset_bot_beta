@@ -5,6 +5,7 @@ from pyrogram.types import Message
 from dotenv import load_dotenv
 from handlers import menu, access, sections, tests, search, news
 from handlers.search import handle_search
+from handlers.checklists import register_checklist_handlers
 from db.database import init_db
 from utils.search_state import search_state
 from config import ADMIN_IDS
@@ -45,6 +46,7 @@ tests.register_test_handlers(app)
 search.register_search_handlers(app)
 news.register_news_handlers(app)
 sections.register_section_handlers(app)
+register_checklist_handlers(app)
 menu.register_menu_handlers(app)
 
 
