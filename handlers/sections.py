@@ -3,16 +3,19 @@ from pyrogram.types import Message
 import sqlite3
 import logging
 from config import ADMIN_IDS
+from utils.whitelist import is_admin
+
+admin_filter = filters.create(lambda _, __, m: is_admin(m.from_user.id))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 pending_titles = {}
 pending_contents = {}
-
-# === состояния для редактирования ===
 pending_edit_section = {}
 pending_edit_title = {}
+
+MAX_SLOT = 4
 
 
 def validate_input(text: str, max_length: int = 1000) -> bool:
@@ -24,7 +27,6 @@ def validate_input(text: str, max_length: int = 1000) -> bool:
 
 
 def register_section_handlers(app: Client):
-    # === /add_section ===
     @app.on_message(filters.command("add_section") & filters.private, group=1)
     async def start_add_section(client: Client, message: Message):
         user_id = message.from_user.id
@@ -84,7 +86,6 @@ def register_section_handlers(app: Client):
             await message.reply("✅ Раздел сохранён")
             return
 
-    # === /edit_section ===
     @app.on_message(filters.command("edit_section") & filters.private, group=10)
     async def start_edit_section(client: Client, message: Message):
         user_id = message.from_user.id
@@ -115,7 +116,6 @@ def register_section_handlers(app: Client):
         if user_id not in ADMIN_IDS:
             return
 
-        # шаг 1: выбор ID
         if pending_edit_section.get(user_id) is True:
             try:
                 section_id = int(message.text.strip())
@@ -126,7 +126,6 @@ def register_section_handlers(app: Client):
                 await message.reply("❌ ID должно быть числом")
             return
 
-        # шаг 2: ввод нового заголовка
         if pending_edit_title.get(user_id) is True:
             title = message.text.strip()
             if not validate_input(title, 200):
@@ -136,7 +135,6 @@ def register_section_handlers(app: Client):
             await message.reply("Теперь введи новое содержание:")
             return
 
-        # шаг 3: ввод нового содержания
         if isinstance(pending_edit_title.get(user_id), str):
             content = message.text.strip()
             if not validate_input(content, 8000):
@@ -151,7 +149,7 @@ def register_section_handlers(app: Client):
                 c = conn.cursor()
                 c.execute(
                     "UPDATE sections SET title=?, content=? WHERE id=?",
-                    (new_title, content, section_id)
+                    (new_title, content, section_id),
                 )
                 conn.commit()
                 logger.info(f"[Обновлён раздел] ID: {section_id}")
@@ -165,3 +163,63 @@ def register_section_handlers(app: Client):
             pending_edit_section.pop(user_id, None)
             pending_edit_title.pop(user_id, None)
             await message.reply("✅ Раздел обновлён")
+
+    @app.on_message(filters.command("set_photo") & admin_filter, group=0)
+    async def cmd_set_photo(client, message):
+        logger.info("cmd /set_photo от %s: %s", message.from_user.id, message.text)
+        logger.info(
+            "reply_to_message.photo = %s",
+            bool(message.reply_to_message and message.reply_to_message.photo),
+        )
+        logger.info("message.photo = %s", bool(message.photo))
+        try:
+            section_id = int(message.command[1])
+            slot = int(message.command[2]) if len(message.command) > 2 else 1
+            if not (1 <= slot <= MAX_SLOT):
+                raise ValueError
+        except (IndexError, ValueError):
+            await message.reply(
+                "ℹ️ Использование:\n"
+                "1) пришлите фото\n"
+                "2) ответом: /set_photo <ID_раздела> [<1-4>]"
+            )
+            return
+
+        photo = (
+            message.reply_to_message.photo
+            if message.reply_to_message and message.reply_to_message.photo
+            else message.photo
+        )
+        if not photo:
+            await message.reply(
+                "❗️Команда должна быть в ответ на фото " "или в подписи к фото."
+            )
+            return
+
+        file_id = photo.file_id
+        column = "photo_id" if slot == 1 else f"photo_id{slot}"
+
+        with sqlite3.connect("data.db") as conn:
+            conn.execute(
+                f"UPDATE sections SET {column}=? WHERE id=?", (file_id, section_id)
+            )
+        await message.reply(f"✅ Фото сохранено в слот {slot} для раздела {section_id}")
+
+    @app.on_message(filters.command("remove_photo") & admin_filter, group=0)
+    async def cmd_remove_photo(client, message):
+        try:
+            section_id = int(message.command[1])
+            slot = int(message.command[2]) if len(message.command) > 2 else 1
+            if not (1 <= slot <= MAX_SLOT):
+                raise ValueError
+        except (IndexError, ValueError):
+            await message.reply("ℹ️ Использование: /remove_photo <ID_раздела> [<1-4>]")
+            return
+
+        column = "photo_id" if slot == 1 else f"photo_id{slot}"
+        with sqlite3.connect("data.db") as conn:
+            cur = conn.execute(
+                f"UPDATE sections SET {column}=NULL WHERE id=?", (section_id,)
+            )
+            ok = cur.rowcount
+        await message.reply("✅ Фото удалено" if ok else "⚠️ Раздел не найден")

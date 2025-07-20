@@ -3,7 +3,6 @@ from typing import Optional, List, Tuple, Dict, Any
 import logging
 from contextlib import contextmanager
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -14,10 +13,9 @@ DB_PATH = "db/data.db"
 
 @contextmanager
 def db_connection():
-    """Контекстный менеджер для работы с БД"""
     conn = sqlite3.connect(DB_PATH, timeout=20, detect_types=sqlite3.PARSE_DECLTYPES)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row  # Для доступа к колонкам по имени
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     except sqlite3.Error as e:
@@ -29,12 +27,10 @@ def db_connection():
 
 
 def init_db():
-    """Инициализация структуры БД с проверкой существования таблиц"""
     try:
         with db_connection() as conn:
             cursor = conn.cursor()
 
-            # Таблица пользователей
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS whitelist (
@@ -44,7 +40,6 @@ def init_db():
                 )"""
             )
 
-            # Таблица статистики (исправленные названия колонок)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS test_stats (
@@ -58,7 +53,6 @@ def init_db():
                 )"""
             )
 
-            # Индексы
             cursor.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_test_stats_user 
@@ -80,7 +74,6 @@ def init_db():
 
 
 def add_user(user_id: int, name: str) -> bool:
-    """Добавление пользователя с проверкой"""
     try:
         with db_connection() as conn:
             conn.execute(
@@ -98,7 +91,6 @@ def add_user(user_id: int, name: str) -> bool:
 
 
 def get_whitelist_users() -> List[Dict[str, Any]]:
-    """Получение всех пользователей из whitelist"""
     try:
         with db_connection() as conn:
             cursor = conn.cursor()
@@ -110,7 +102,6 @@ def get_whitelist_users() -> List[Dict[str, Any]]:
 
 
 def save_test_result(user_id: int, section_id: int, correct: int, total: int) -> bool:
-    """Сохранение результатов теста с проверкой пользователя"""
     if not is_user_allowed(user_id):
         logger.warning(f"Пользователь {user_id} не в whitelist")
         return False
@@ -134,12 +125,12 @@ def save_test_result(user_id: int, section_id: int, correct: int, total: int) ->
     def get_connection():
         conn = sqlite3.connect(
             DB_PATH,
-            timeout=30,  # Увеличиваем время ожидания
-            check_same_thread=False,  # Разрешаем доступ из разных потоков
-            isolation_level=None  # Автоматическое управление транзакциями
+            timeout=30,
+            check_same_thread=False,
+            isolation_level=None
         )
-        conn.execute("PRAGMA journal_mode=WAL")  # Режим журналирования
-        conn.execute("PRAGMA busy_timeout=30000")  # Таймаут 30 секунд
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
     

@@ -10,6 +10,7 @@ from db.database import init_db
 from utils.search_state import search_state
 from config import ADMIN_IDS
 from flask import Flask
+from handlers.help import register_help_handler
 
 load_dotenv()
 
@@ -42,6 +43,7 @@ app = Client(
 
 init_db()
 access.register_access_handlers(app)
+register_help_handler(app)
 tests.register_test_handlers(app)
 search.register_search_handlers(app)
 news.register_news_handlers(app)

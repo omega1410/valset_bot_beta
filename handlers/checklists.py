@@ -38,7 +38,6 @@ FIXED_TASKS = {
 
 def register_checklist_handlers(app: Client):
     def init_db():
-        """Инициализация базы данных"""
         with sqlite3.connect("data.db") as conn:
             conn.execute(
                 """
@@ -54,7 +53,6 @@ def register_checklist_handlers(app: Client):
                 """
             )
 
-            # Добавляем стандартные задачи
             for shift_type, tasks in FIXED_TASKS.items():
                 for task in tasks:
                     try:
@@ -73,14 +71,12 @@ def register_checklist_handlers(app: Client):
     async def show_checklist(
         client: Client, callback_query: CallbackQuery, shift_type: str
     ):
-        """Показывает чек-лист"""
         user_id = callback_query.from_user.id
 
         with sqlite3.connect("data.db") as conn:
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
 
-            # Получаем задачи
             c.execute(
                 "SELECT id, task_text, is_done FROM checklist_tasks "
                 "WHERE checklist_name = ? AND user_id IN (0, ?) "
@@ -112,7 +108,6 @@ def register_checklist_handlers(app: Client):
 
     @app.on_callback_query(filters.regex("^open_checklists$"), group=12)
     async def open_checklists(client: Client, callback_query: CallbackQuery):
-        """Меню выбора смены"""
         keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -142,7 +137,6 @@ def register_checklist_handlers(app: Client):
 
     @app.on_callback_query(filters.regex("^toggle_task_"), group=12)
     async def toggle_task(client: Client, callback_query: CallbackQuery):
-        """Переключение статуса задачи"""
         data = callback_query.data.split("_")
         task_id = int(data[2])
         shift_type = data[3]
@@ -151,7 +145,6 @@ def register_checklist_handlers(app: Client):
         with sqlite3.connect("data.db") as conn:
             c = conn.cursor()
 
-            # Переключаем статус
             c.execute(
                 "UPDATE checklist_tasks SET is_done = NOT is_done "
                 "WHERE id = ? AND user_id IN (0, ?)",
@@ -159,15 +152,13 @@ def register_checklist_handlers(app: Client):
             )
             conn.commit()
 
-            # Проверяем все ли задачи выполнены
             c.execute(
                 "SELECT COUNT(*) FROM checklist_tasks "
                 "WHERE checklist_name = ? AND user_id IN (0, ?) AND is_done = 0",
                 (shift_type, user_id),
             )
 
-            if c.fetchone()[0] == 0:  # Все задачи выполнены
-                # Сбрасываем все задачи
+            if c.fetchone()[0] == 0:
                 c.execute(
                     "UPDATE checklist_tasks SET is_done = 0 "
                     "WHERE checklist_name = ? AND user_id IN (0, ?)",
@@ -175,7 +166,6 @@ def register_checklist_handlers(app: Client):
                 )
                 conn.commit()
 
-                # Отправляем сообщение о завершении
                 await callback_query.message.edit_text(
                     f"🎉 Все задачи {'дневной' if shift_type == 'day' else 'ночной'} смены выполнены!\n"
                     "Чек-лист сброшен.",
@@ -191,7 +181,6 @@ def register_checklist_handlers(app: Client):
                 )
                 return
 
-        # Обновляем список задач
         if shift_type == "day":
             await show_day_checklist(client, callback_query)
         else:
