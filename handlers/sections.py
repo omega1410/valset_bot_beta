@@ -1,9 +1,10 @@
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InputMediaPhoto
 import sqlite3
 import logging
 from config import ADMIN_IDS
 from utils.whitelist import is_admin
+from pyrogram.enums import ParseMode
 
 admin_filter = filters.create(lambda _, __, m: is_admin(m.from_user.id))
 
@@ -15,7 +16,13 @@ pending_contents = {}
 pending_edit_section = {}
 pending_edit_title = {}
 
-MAX_SLOT = 4
+MAX_SLOT = 7
+MSG_LIMIT = 4096
+CAPTION_LIMIT = 1024
+
+
+def split_text(text: str, size: int = MSG_LIMIT):
+    return [text[i : i + size] for i in range(0, len(text), size)]
 
 
 def validate_input(text: str, max_length: int = 1000) -> bool:
@@ -166,12 +173,6 @@ def register_section_handlers(app: Client):
 
     @app.on_message(filters.command("set_photo") & admin_filter, group=0)
     async def cmd_set_photo(client, message):
-        logger.info("cmd /set_photo от %s: %s", message.from_user.id, message.text)
-        logger.info(
-            "reply_to_message.photo = %s",
-            bool(message.reply_to_message and message.reply_to_message.photo),
-        )
-        logger.info("message.photo = %s", bool(message.photo))
         try:
             section_id = int(message.command[1])
             slot = int(message.command[2]) if len(message.command) > 2 else 1
@@ -181,9 +182,11 @@ def register_section_handlers(app: Client):
             await message.reply(
                 "ℹ️ Использование:\n"
                 "1) пришлите фото\n"
-                "2) ответом: /set_photo <ID_раздела> [<1-4>]"
+                "2) ответом: /set_photo <ID_раздела> [<1-7>]"
             )
             return
+
+        column = "photo_id" if slot == 1 else f"photo_id{slot}"
 
         photo = (
             message.reply_to_message.photo
@@ -213,9 +216,8 @@ def register_section_handlers(app: Client):
             if not (1 <= slot <= MAX_SLOT):
                 raise ValueError
         except (IndexError, ValueError):
-            await message.reply("ℹ️ Использование: /remove_photo <ID_раздела> [<1-4>]")
+            await message.reply("ℹ️ Использование: /remove_photo <ID_раздела> [<1-7>]")
             return
-
         column = "photo_id" if slot == 1 else f"photo_id{slot}"
         with sqlite3.connect("data.db") as conn:
             cur = conn.execute(
@@ -223,3 +225,71 @@ def register_section_handlers(app: Client):
             )
             ok = cur.rowcount
         await message.reply("✅ Фото удалено" if ok else "⚠️ Раздел не найден")
+
+    @app.on_message(filters.command("view_section") & filters.private, group=5)
+    async def view_section(client: Client, message: Message):
+        args = message.command
+
+        if len(args) == 1:
+            with sqlite3.connect("data.db") as conn:
+                rows = conn.execute("SELECT id, title FROM sections").fetchall()
+
+            if not rows:
+                await message.reply("⚠️ Разделов пока нет.")
+                return
+
+            text = "🗂️ Доступные разделы:\n\n" + "\n".join(
+                f"{row[0]} — {row[1]}" for row in rows
+            )
+            await message.reply(text)
+            return
+
+        try:
+            section_id = int(args[1])
+        except ValueError:
+            await message.reply("❌ ID должно быть числом")
+            return
+
+        with sqlite3.connect("data.db") as conn:
+            row = conn.execute(
+                """
+                SELECT title, content,
+                       COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),
+                       COALESCE(photo_id4, ''), COALESCE(photo_id5, ''), COALESCE(photo_id6, ''),
+                       COALESCE(photo_id7, '')
+                FROM sections
+                WHERE id = ?
+                """,
+                (section_id,),
+            ).fetchone()
+
+        if row is None:
+            await message.reply("⚠️ Раздел не найден.")
+            return
+
+        title, content, *photos = row
+        photos = [p for p in photos if p]
+
+        chat_id = message.chat.id
+
+        if photos:
+            caption = f"<b>{title}</b>"
+            media = [
+                InputMediaPhoto(photos[0], caption=caption, parse_mode=ParseMode.HTML)
+            ]
+            media += [InputMediaPhoto(p) for p in photos[1:]]
+            await client.send_media_group(chat_id, media)
+
+            if content.strip():
+                for chunk in split_text(content):
+                    await client.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+            return
+
+        full_text = f"<b>{title}</b>\n\n{content}"
+        if len(full_text) <= MSG_LIMIT:
+            await message.reply(full_text, parse_mode=ParseMode.HTML)
+        else:
+            parts = split_text(full_text)
+            await message.reply(parts[0], parse_mode=ParseMode.HTML)
+            for part in parts[1:]:
+                await client.send_message(chat_id, part, parse_mode=ParseMode.HTML)

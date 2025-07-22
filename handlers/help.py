@@ -21,6 +21,8 @@ def register_help_handler(app: Client):
             "/news": "Разослать новость",
             "/add_section": "Создать новый раздел",
             "/edit_section": "Редактировать раздел",
+            "/view_section": "Просмотреть все разделы",
+            "/view_section ID": "Просмотреть определенный раздел",
             "/set_photo ID раздела": "Добавить фото к разделу",
             "/remove_photo ID раздела": "Удалить фото из раздела"
         }
