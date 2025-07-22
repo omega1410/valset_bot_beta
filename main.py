@@ -3,6 +3,9 @@ import os
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from handlers import menu, access, sections, tests, search, news
 from handlers.search import handle_search
 from handlers.checklists import register_checklist_handlers
@@ -11,8 +14,7 @@ from utils.search_state import search_state
 from config import ADMIN_IDS
 from flask import Flask
 from handlers.help import register_help_handler
-
-load_dotenv()
+from handlers import ai_assistant
 
 logging.basicConfig(level=logging.INFO)
 
@@ -49,6 +51,8 @@ search.register_search_handlers(app)
 news.register_news_handlers(app)
 sections.register_section_handlers(app)
 register_checklist_handlers(app)
+ai_assistant.init_vector_table()
+ai_assistant.register_ai_handlers(app)
 menu.register_menu_handlers(app)
 
 
