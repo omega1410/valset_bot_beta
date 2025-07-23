@@ -1,9 +1,16 @@
 from __future__ import annotations
 import os, sqlite3, textwrap, functools, numpy as np
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    Message,
+)
 import google.generativeai as genai
-from config import ADMIN_IDS  # чтобы ограничить /reindex_ai
+from config import ADMIN_IDS
+from utils.ai_state import ai_state
+
 
 DB_PATH = "data.db"
 CHUNK_SIZE = 1500  # символов
@@ -113,17 +120,38 @@ def generate_answer(question: str) -> str:
 # ─────── 6. Pyrogram-хендлеры ───────
 def register_ai_handlers(app: Client):
 
-    # /ask_ai <вопрос>
-    @app.on_message(filters.command("ask_ai") & filters.private, group=15)
-    async def ask_ai_cmd(_, m: Message):
-        if len(m.command) == 1:
-            await m.reply("Использование:  /ask_ai <вопрос>")
-            return
+    # КНОПКА в меню ➜ callback «start_ai»
+    @app.on_callback_query(filters.regex("^start_ai$"), group=20)
+    async def start_ai(_, cq: CallbackQuery):
+        uid = cq.from_user.id
+        ai_state.add(uid)
+        await cq.message.edit_text(
+            "🤖 Введите вопрос для AI-помощника:",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+            ),
+        )
+        await cq.answer()
 
-        question = " ".join(m.command[1:])
-        await m.reply("⏳ Думаю...")
+    # Обычное текст-сообщение от пользователя, который в ai_state
+    @app.on_message(
+        filters.text
+        & filters.private
+        & filters.create(lambda _, __, m: m.from_user.id in ai_state),
+        group=21,
+    )
+    async def handle_ai_question(_, msg: Message):
+        uid = msg.from_user.id
+        ai_state.discard(uid)  # больше не ждём вопрос
+        question = msg.text.strip()
+        await msg.reply("⏳ Думаю…")
         answer = generate_answer(question)
-        await m.reply(answer)
+        await msg.reply(
+            answer,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+            ),
+        )
 
     # /reindex_ai  (только для админов)
     @app.on_message(filters.command("reindex_ai") & filters.private, group=15)
