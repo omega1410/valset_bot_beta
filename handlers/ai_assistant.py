@@ -142,10 +142,19 @@ def register_ai_handlers(app: Client):
     )
     async def handle_ai_question(_, msg: Message):
         uid = msg.from_user.id
-        ai_state.discard(uid)  # больше не ждём вопрос
+        ai_state.discard(uid)
+
         question = msg.text.strip()
-        await msg.reply("⏳ Думаю…")
-        answer = generate_answer(question)
+        thinking_msg = await msg.reply("⏳ Думаю…")  # ← индикатор
+
+        try:
+            answer = generate_answer(question)
+        finally:
+            try:
+                await thinking_msg.delete()  # ← удаляем
+            except Exception:
+                pass
+
         await msg.reply(
             answer,
             reply_markup=InlineKeyboardMarkup(

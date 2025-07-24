@@ -3,6 +3,7 @@ import os
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from dotenv import load_dotenv
+from feedback import register_feedback_handlers
 
 load_dotenv()
 
@@ -15,6 +16,7 @@ from config import ADMIN_IDS
 from flask import Flask
 from handlers.help import register_help_handler
 from handlers import ai_assistant
+from handlers.logbook import register_logbook
 
 logging.basicConfig(level=logging.INFO)
 
@@ -53,6 +55,8 @@ sections.register_section_handlers(app)
 register_checklist_handlers(app)
 ai_assistant.init_vector_table()
 ai_assistant.register_ai_handlers(app)
+register_feedback_handlers(app)
+register_logbook(app)
 menu.register_menu_handlers(app)
 
 

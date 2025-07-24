@@ -12,6 +12,7 @@ def register_help_handler(app: Client):
             "/start": "Запустить бота и открыть главное меню",
             "/help": "Показать это сообщение",
             "/stats": "Посмотреть статистику",
+            "/feedback": "Отправить фидбэк",
         }
 
         admin_commands = {
@@ -24,7 +25,7 @@ def register_help_handler(app: Client):
             "/view_section": "Просмотреть все разделы",
             "/view_section ID": "Просмотреть определенный раздел",
             "/set_photo ID раздела": "Добавить фото к разделу",
-            "/remove_photo ID раздела": "Удалить фото из раздела"
+            "/remove_photo ID раздела": "Удалить фото из раздела",
         }
 
         lines = ["💡 Доступные команды:\n"]
