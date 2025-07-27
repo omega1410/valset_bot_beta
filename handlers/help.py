@@ -26,6 +26,8 @@ def register_help_handler(app: Client):
             "/view_section ID": "Просмотреть определенный раздел",
             "/set_photo ID раздела": "Добавить фото к разделу",
             "/remove_photo ID раздела": "Удалить фото из раздела",
+            "/delete_schedule": "Удалить график",
+            "/add_schedule": "Обновить график (перед этим удалить)",
         }
 
         lines = ["💡 Доступные команды:\n"]

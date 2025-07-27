@@ -1,16 +1,16 @@
 services:
   - type: web
-    name: telegram-bot # Название вашего сервиса
+    name: telegram-bot
     runtime: python
     env: python
-    plan: free # Бесплатный тариф
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py # Запуск вашего основного файла
+    startCommand: python main.py
     envVars:
       - key: PORT
-        value: 10000 # Обязательно порт 10000 для Render
+        value: 10000
       - key: API_ID
-        value: 20102665 # Замените на реальные значения
+        value: 20102665
       - key: API_HASH
         value: aa7944e9d15ae957f2163351dd09d3a6
       - key: BOT_TOKEN

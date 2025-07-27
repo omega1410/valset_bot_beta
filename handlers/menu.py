@@ -1,17 +1,98 @@
 # handlers/menu.py
-from pyrogram import Client
+import os
+from pyrogram import Client, filters
 from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    Message,
 )
 import sqlite3
+import logging
 from utils.menu import get_main_menu
 from handlers.tests import tests
 from utils.search_state import search_state
+from config import ADMIN_IDS
+
+logger = logging.getLogger(__name__)
+SCHEDULE_PATH = "assets/schedule.png"
 
 
 def register_menu_handlers(app: Client):
+    @app.on_callback_query(filters.regex("^show_schedule$"), group=10)
+    async def handle_show_schedule(client: Client, callback_query: CallbackQuery):
+        user_id = callback_query.from_user.id
+        await callback_query.answer()
+
+        if not os.path.exists(SCHEDULE_PATH):
+            await callback_query.message.edit_text(
+                "⚠️ График смен временно недоступен",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+                ),
+            )
+            return
+
+        try:
+            await callback_query.message.delete()
+        except Exception:
+            pass
+
+        await client.send_photo(
+            chat_id=callback_query.message.chat.id,
+            photo=SCHEDULE_PATH,
+            caption="📆 Актуальный график смен",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
+            ),
+        )
+
+    @app.on_message(filters.command("add_schedule") & filters.private, group=11)
+    async def cmd_add_schedule(client: Client, message: Message):
+        user_id = message.from_user.id
+        if user_id not in ADMIN_IDS:
+            await message.reply("⛔️ Нет доступа")
+            return
+
+        photo = None
+        if message.photo:
+            photo = message.photo
+        elif message.reply_to_message and message.reply_to_message.photo:
+            photo = message.reply_to_message.photo
+
+        if not photo:
+            await message.reply(
+                "ℹ️ Пришлите фото графика или ответьте на фото командой /add_schedule"
+            )
+            return
+
+        try:
+            await client.download_media(photo.file_id, SCHEDULE_PATH)
+            await message.reply("✅ График смен успешно обновлён!")
+            logger.info(f"Админ {user_id} обновил график смен")
+        except Exception as e:
+            await message.reply(f"❌ Ошибка при сохранении: {e}")
+            logger.error(f"Ошибка обновления графика: {e}")
+
+    @app.on_message(filters.command("delete_schedule") & filters.private, group=11)
+    async def cmd_delete_schedule(client: Client, message: Message):
+        user_id = message.from_user.id
+        if user_id not in ADMIN_IDS:
+            await message.reply("⛔️ Нет доступа")
+            return
+
+        if not os.path.exists(SCHEDULE_PATH):
+            await message.reply("⚠️ График смен не найден")
+            return
+
+        try:
+            os.remove(SCHEDULE_PATH)
+            await message.reply("✅ График смен удалён")
+            logger.info(f"Админ {user_id} удалил график смен")
+        except Exception as e:
+            await message.reply(f"❌ Ошибка при удалении: {e}")
+            logger.error(f"Ошибка удаления графика: {e}")
+
     @app.on_callback_query(group=10)
     async def handle_callback(client: Client, callback_query: CallbackQuery):
         data = callback_query.data
@@ -19,28 +100,6 @@ def register_menu_handlers(app: Client):
         await callback_query.answer()
 
         try:
-            if data == "show_schedule":
-                try:
-                    await callback_query.message.delete()
-                except Exception:
-                    pass
-
-                await client.send_photo(
-                    chat_id=callback_query.message.chat.id,
-                    photo="assets/schedule.png",
-                    caption="📆 Актуальный график смен",
-                    reply_markup=InlineKeyboardMarkup(
-                        [
-                            [
-                                InlineKeyboardButton(
-                                    "🔙 Назад", callback_data="back_to_main"
-                                )
-                            ]
-                        ]
-                    ),
-                )
-                return
-
             if data.startswith("sections_"):
                 try:
                     page = int(data.split("_")[1])
@@ -52,7 +111,7 @@ def register_menu_handlers(app: Client):
                 page = None
 
             if page:
-                per_page = 7
+                per_page = 8
                 offset = (page - 1) * per_page
 
                 conn = sqlite3.connect("data.db")
@@ -80,7 +139,6 @@ def register_menu_handlers(app: Client):
                     for section_id, title in sections
                 ]
 
-                # пагинация
                 pagination = []
                 if page > 1:
                     pagination.append(
