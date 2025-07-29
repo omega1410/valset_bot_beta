@@ -50,28 +50,46 @@ def register_checklist_handlers(app: Client):
                     user_id INTEGER NOT NULL,
                     UNIQUE(checklist_name, task_text, user_id)
                 )
-                """
+            """
             )
-
-            for shift_type, tasks in FIXED_TASKS.items():
-                for task in tasks:
-                    try:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO checklist_tasks "
-                            "(checklist_name, task_text, task_order, user_id) "
-                            "VALUES (?, ?, ?, ?)",
-                            (shift_type, task["text"], task["order"], 0),
-                        )
-                    except sqlite3.Error as e:
-                        logger.error(f"Ошибка добавления задачи: {e}")
             conn.commit()
 
     init_db()
+
+    async def ensure_user_tasks(user_id: int, shift_type: str):
+        """Убедиться, что у пользователя есть персональные задачи"""
+        with sqlite3.connect("data.db") as conn:
+            c = conn.cursor()
+
+            # Проверяем, есть ли уже задачи у пользователя
+            c.execute(
+                "SELECT COUNT(*) FROM checklist_tasks WHERE checklist_name = ? AND user_id = ?",
+                (shift_type, user_id),
+            )
+
+            if c.fetchone()[0] == 0:
+                # Копируем общие задачи для пользователя
+                for task in FIXED_TASKS[shift_type]:
+                    try:
+                        c.execute(
+                            "INSERT OR IGNORE INTO checklist_tasks "
+                            "(checklist_name, task_text, task_order, user_id) "
+                            "VALUES (?, ?, ?, ?)",
+                            (shift_type, task["text"], task["order"], user_id),
+                        )
+                    except sqlite3.Error as e:
+                        logger.error(
+                            f"Ошибка добавления задачи для пользователя {user_id}: {e}"
+                        )
+                conn.commit()
 
     async def show_checklist(
         client: Client, callback_query: CallbackQuery, shift_type: str
     ):
         user_id = callback_query.from_user.id
+
+        # Убедиться, что у пользователя есть персональные задачи
+        await ensure_user_tasks(user_id, shift_type)
 
         with sqlite3.connect("data.db") as conn:
             conn.row_factory = sqlite3.Row
@@ -79,7 +97,7 @@ def register_checklist_handlers(app: Client):
 
             c.execute(
                 "SELECT id, task_text, is_done FROM checklist_tasks "
-                "WHERE checklist_name = ? AND user_id IN (0, ?) "
+                "WHERE checklist_name = ? AND user_id = ? "
                 "ORDER BY task_order",
                 (shift_type, user_id),
             )
@@ -145,23 +163,26 @@ def register_checklist_handlers(app: Client):
         with sqlite3.connect("data.db") as conn:
             c = conn.cursor()
 
+            # Переключаем статус задачи только для текущего пользователя
             c.execute(
                 "UPDATE checklist_tasks SET is_done = NOT is_done "
-                "WHERE id = ? AND user_id IN (0, ?)",
+                "WHERE id = ? AND user_id = ?",
                 (task_id, user_id),
             )
             conn.commit()
 
+            # Проверяем, все ли задачи выполнены
             c.execute(
                 "SELECT COUNT(*) FROM checklist_tasks "
-                "WHERE checklist_name = ? AND user_id IN (0, ?) AND is_done = 0",
+                "WHERE checklist_name = ? AND user_id = ? AND is_done = 0",
                 (shift_type, user_id),
             )
 
             if c.fetchone()[0] == 0:
+                # Сбрасываем все задачи для пользователя
                 c.execute(
                     "UPDATE checklist_tasks SET is_done = 0 "
-                    "WHERE checklist_name = ? AND user_id IN (0, ?)",
+                    "WHERE checklist_name = ? AND user_id = ?",
                     (shift_type, user_id),
                 )
                 conn.commit()
