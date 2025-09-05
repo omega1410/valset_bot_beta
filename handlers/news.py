@@ -4,13 +4,29 @@ from config import ADMIN_IDS
 from utils import news_state
 import sqlite3
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 
 def register_news_handlers(app: Client):
+    """
+    Регистрирует обработчики команды рассылки новостей.
+    
+    Обрабатывает:
+    - /news для запуска режима ввода текста
+    - Отправку сообщений всем пользователям из белого списка
+    """
+    
     @app.on_message(filters.command("news") & filters.private, group=20)
     async def start_news(client: Client, message: Message):
+        """
+        Запускает режим ввода текста для рассылки.
+        
+        Args:
+            client: Клиент Pyrogram
+            message: Сообщение пользователя
+        """
         if message.from_user.id not in ADMIN_IDS:
             await message.reply("⛔️ Доступ запрещён.")
             return
@@ -20,6 +36,13 @@ def register_news_handlers(app: Client):
 
     @app.on_message(filters.text & filters.private, group=20)
     async def handle_news_text(client: Client, message: Message):
+        """
+        Обрабатывает текст рассылки и отправляет его всем подписчикам.
+        
+        Args:
+            client: Клиент Pyrogram
+            message: Сообщение с текстом рассылки
+        """
         user_id = message.from_user.id
         if not news_state.has(user_id):
             return
@@ -31,6 +54,12 @@ def register_news_handlers(app: Client):
             with sqlite3.connect("data.db", timeout=10) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
+
+                # Проверяем существование таблицы
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='whitelist'")
+                if not cursor.fetchone():
+                    await message.reply("⚠️ Таблица белого списка не найдена")
+                    return
 
                 cursor.execute("SELECT user_id FROM whitelist")
                 users = cursor.fetchall()
@@ -48,12 +77,18 @@ def register_news_handlers(app: Client):
 
         count = 0
         errors = []
-        for user in users:
+        for idx, user in enumerate(users, 1):
             try:
                 await client.send_message(
-                    user["user_id"], f"🔔 Рассылка:\n\n{news_text}"
+                    user["user_id"], 
+                    f"🔔 Рассылка:\n\n{news_text}"
                 )
                 count += 1
+                
+                # Анти-рейтлимит задержка (Telegram позволяет ~30 сообщений/сек)
+                if idx % 10 == 0:
+                    await asyncio.sleep(1)
+                    
             except Exception as e:
                 errors.append(f"{user['user_id']}: {str(e)}")
                 logger.warning(f"Не удалось отправить {user['user_id']}: {e}")

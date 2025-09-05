@@ -1,5 +1,11 @@
 from pyrogram import Client, filters
-from pyrogram.types import Message, InputMediaPhoto
+from pyrogram.types import (
+    Message,
+    InputMediaPhoto,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 import sqlite3
 import logging
 from config import ADMIN_IDS
@@ -19,6 +25,9 @@ pending_edit_title = {}
 MAX_SLOT = 7
 MSG_LIMIT = 4096
 CAPTION_LIMIT = 1024
+
+# Хранилище для отслеживания текущей позиции в карусели
+carousel_state = {}  # {user_id: {section_id: current_photo_index}}
 
 
 def split_text(text: str, size: int = MSG_LIMIT):
@@ -250,13 +259,20 @@ def register_section_handlers(app: Client):
             await message.reply("❌ ID должно быть числом")
             return
 
+        # Показываем раздел с кнопкой для карусели вместо всех фото сразу
+        await show_section_with_carousel_option(client, message, section_id)
+
+    async def show_section_with_carousel_option(
+        client: Client, message: Message, section_id: int
+    ):
+        """Показать раздел с опцией перехода в карусель"""
         with sqlite3.connect("data.db") as conn:
             row = conn.execute(
                 """
                 SELECT title, content,
-                       COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),
-                       COALESCE(photo_id4, ''), COALESCE(photo_id5, ''), COALESCE(photo_id6, ''),
-                       COALESCE(photo_id7, '')
+                    COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),
+                    COALESCE(photo_id4, ''), COALESCE(photo_id5, ''), COALESCE(photo_id6, ''),
+                    COALESCE(photo_id7, '')
                 FROM sections
                 WHERE id = ?
                 """,
@@ -268,28 +284,231 @@ def register_section_handlers(app: Client):
             return
 
         title, content, *photos = row
-        photos = [p for p in photos if p]
+        photos = [p for p in photos if p]  # Убираем пустые значения
 
-        chat_id = message.chat.id
+        # Создаем клавиатуру с кнопкой для карусели, если есть фото
+        keyboard = []
 
         if photos:
-            caption = f"<b>{title}</b>"
-            media = [
-                InputMediaPhoto(photos[0], caption=caption, parse_mode=ParseMode.HTML)
-            ]
-            media += [InputMediaPhoto(p) for p in photos[1:]]
-            await client.send_media_group(chat_id, media)
+            # Добавляем кнопку для перехода в режим карусели
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        f"🖼️ Просмотр фото ({len(photos)} шт.)",
+                        callback_data=f"start_carousel_{section_id}",
+                    )
+                ]
+            )
 
-            if content.strip():
-                for chunk in split_text(content):
-                    await client.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+        # Кнопка "Назад" в список разделов
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "🔙 Назад к разделам", callback_data="back_to_sections"
+                )
+            ]
+        )
+
+        # Показываем только текст раздела
+        full_text = f"<b>{title}</b>"
+        if content.strip():
+            full_text += f"\n\n{content}"
+
+        if len(full_text) <= MSG_LIMIT:
+            await message.reply(
+                full_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+        else:
+            # Если текст слишком длинный, показываем краткое описание
+            preview_text = f"<b>{title}</b>\n\n"
+            content_preview = content[:500] + "..." if len(content) > 500 else content
+            preview_text += content_preview
+            if photos:
+                preview_text += f"\n\n📷 Фото доступно: {len(photos)} шт."
+            await message.reply(
+                preview_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+    @app.on_callback_query(filters.regex(r"^start_carousel_(\d+)$"), group=15)
+    async def start_carousel(client: Client, callback_query: CallbackQuery):
+        """Начать просмотр фото в режиме карусели"""
+        section_id = int(callback_query.matches[0].group(1))
+        await show_carousel_photo(client, callback_query.message, section_id, 0)
+        await callback_query.answer()
+
+    @app.on_callback_query(filters.regex(r"^back_to_sections$"))
+    async def back_to_sections(client: Client, callback_query: CallbackQuery):
+        with sqlite3.connect("data.db") as conn:
+            rows = conn.execute("SELECT id, title FROM sections").fetchall()
+
+        if not rows:
+            await callback_query.message.edit_text("⚠️ Разделов пока нет.")
             return
 
-        full_text = f"<b>{title}</b>\n\n{content}"
-        if len(full_text) <= MSG_LIMIT:
-            await message.reply(full_text, parse_mode=ParseMode.HTML)
-        else:
-            parts = split_text(full_text)
-            await message.reply(parts[0], parse_mode=ParseMode.HTML)
-            for part in parts[1:]:
-                await client.send_message(chat_id, part, parse_mode=ParseMode.HTML)
+        text = "🗂️ Доступные разделы:\n\n" + "\n".join(
+            f"{row[0]} — {row[1]}" for row in rows
+        )
+        await callback_query.message.edit_text(text)
+        await callback_query.answer()
+
+    # Функция для показа фото в карусели
+    async def show_carousel_photo(
+        client: Client, message: Message, section_id: int, photo_index: int
+    ):
+        """Показать фото из карусели с навигационными кнопками"""
+        with sqlite3.connect("data.db") as conn:
+            row = conn.execute(
+                """
+                SELECT title,
+                    COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),
+                    COALESCE(photo_id4, ''), COALESCE(photo_id5, ''), COALESCE(photo_id6, ''),
+                    COALESCE(photo_id7, '')
+                FROM sections
+                WHERE id = ?
+                """,
+                (section_id,),
+            ).fetchone()
+
+        if row is None:
+            await message.edit_text("⚠️ Раздел не найден.")
+            return
+
+        title, *photos = row
+        photos = [p for p in photos if p]  # Убираем пустые значения
+
+        if not photos:
+            await message.edit_text("⚠️ В разделе нет фото.")
+            return
+
+        # Сохраняем текущую позицию пользователя
+        user_id = message.from_user.id
+        if user_id not in carousel_state:
+            carousel_state[user_id] = {}
+        carousel_state[user_id][section_id] = photo_index
+
+        # Создаем навигационные кнопки
+        keyboard = []
+        nav_row = []
+
+        # Кнопка "Назад" (если не первое фото)
+        if photo_index > 0:
+            nav_row.append(
+                InlineKeyboardButton(
+                    "⬅️ Назад", callback_data=f"carousel_prev_{section_id}_{photo_index}"
+                )
+            )
+
+        # Индикатор текущей позиции
+        nav_row.append(
+            InlineKeyboardButton(
+                f"{photo_index + 1}/{len(photos)}", callback_data="carousel_info"
+            )
+        )
+
+        # Кнопка "Вперед" (если не последнее фото)
+        if photo_index < len(photos) - 1:
+            nav_row.append(
+                InlineKeyboardButton(
+                    "Вперед ➡️",
+                    callback_data=f"carousel_next_{section_id}_{photo_index}",
+                )
+            )
+
+        if nav_row:
+            keyboard.append(nav_row)
+
+        # Кнопка "Назад в раздел"
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "🔙 Назад в раздел", callback_data=f"back_to_section_{section_id}"
+                )
+            ]
+        )
+
+        # Отправляем фото с подписью и кнопками
+        caption = f"<b>{title}</b>\n\nФото {photo_index + 1} из {len(photos)}"
+
+        try:
+            await message.edit_media(
+                InputMediaPhoto(
+                    photos[photo_index], caption=caption, parse_mode=ParseMode.HTML
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+        except:
+            # Если edit_media не работает, отправляем новое сообщение
+            try:
+                await message.delete()
+            except:
+                pass
+            await message.reply_photo(
+                photo=photos[photo_index],
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+    @app.on_callback_query(filters.regex(r"^carousel_prev_(\d+)_(\d+)$"))
+    async def carousel_prev(client: Client, callback_query: CallbackQuery):
+        match = callback_query.matches[0]
+        section_id = int(match.group(1))
+        current_index = int(match.group(2))
+
+        if current_index > 0:
+            new_index = current_index - 1
+            await show_carousel_photo(
+                client, callback_query.message, section_id, new_index
+            )
+        await callback_query.answer()
+
+    @app.on_callback_query(filters.regex(r"^carousel_next_(\d+)_(\d+)$"))
+    async def carousel_next(client: Client, callback_query: CallbackQuery):
+        match = callback_query.matches[0]
+        section_id = int(match.group(1))
+        current_index = int(match.group(2))
+
+        # Проверяем, есть ли следующее фото
+        with sqlite3.connect("data.db") as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),
+                    COALESCE(photo_id4, ''), COALESCE(photo_id5, ''), COALESCE(photo_id6, ''),
+                    COALESCE(photo_id7, '')
+                FROM sections
+                WHERE id = ?
+                """,
+                (section_id,),
+            ).fetchone()
+
+        if row:
+            photos = [p for p in row if p]
+            if current_index < len(photos) - 1:
+                new_index = current_index + 1
+                await show_carousel_photo(
+                    client, callback_query.message, section_id, new_index
+                )
+        await callback_query.answer()
+
+    @app.on_callback_query(filters.regex(r"^carousel_info$"))
+    async def carousel_info(client: Client, callback_query: CallbackQuery):
+        await callback_query.answer("📸 Карусель фото")
+
+    @app.on_callback_query(filters.regex(r"^back_to_section_(\d+)$"))
+    async def back_to_section(client: Client, callback_query: CallbackQuery):
+        section_id = int(callback_query.matches[0].group(1))
+
+        # Очищаем состояние карусели
+        user_id = callback_query.from_user.id
+        if user_id in carousel_state and section_id in carousel_state[user_id]:
+            del carousel_state[user_id][section_id]
+
+        # Показываем раздел обычным способом
+        await show_section_with_carousel_option(
+            client, callback_query.message, section_id
+        )
+        await callback_query.answer()

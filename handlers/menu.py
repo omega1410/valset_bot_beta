@@ -1,4 +1,14 @@
-# handlers/menu.py
+"""
+Модуль обработки меню бота и взаимодействия с пользовательским интерфейсом.
+
+Содержит реализацию:
+- Отображения графика смен
+- Админских команд для управления графиком
+- Навигации по разделам базы данных
+- Обработки вложенных изображений
+- Системы поиска и тестирования
+"""
+
 import os
 from pyrogram import Client, filters
 from pyrogram.types import (
@@ -19,8 +29,31 @@ SCHEDULE_PATH = "assets/schedule.png"
 
 
 def register_menu_handlers(app: Client):
+    """
+    Регистрирует все обработчики меню бота.
+    
+    Args:
+        app: Экземпляр клиента Pyrogram
+        
+    Обрабатывает:
+    - Callback-запросы
+    - Команды администраторов
+    - Навигацию по контенту
+    - Систему поиска
+    """
+    
     @app.on_callback_query(filters.regex("^show_schedule$"), group=10)
     async def handle_show_schedule(client: Client, callback_query: CallbackQuery):
+        """
+        Отправляет график смен пользователю.
+        
+        Проверяет существование файла графика и отправляет его как фото.
+        При отсутствии файла показывает сообщение об ошибке.
+        
+        Args:
+            client: Клиент Pyrogram
+            callback_query: Объект callback-запроса
+        """
         user_id = callback_query.from_user.id
         await callback_query.answer()
 
@@ -49,6 +82,15 @@ def register_menu_handlers(app: Client):
 
     @app.on_message(filters.command("add_schedule") & filters.private, group=11)
     async def cmd_add_schedule(client: Client, message: Message):
+        """
+        Админская команда для обновления графика смен.
+        
+        Позволяет администраторам загружать новое изображение графика.
+        
+        Args:
+            client: Клиент Pyrogram
+            message: Сообщение пользователя
+        """
         user_id = message.from_user.id
         if user_id not in ADMIN_IDS:
             await message.reply("⛔️ Нет доступа")
@@ -76,6 +118,15 @@ def register_menu_handlers(app: Client):
 
     @app.on_message(filters.command("delete_schedule") & filters.private, group=11)
     async def cmd_delete_schedule(client: Client, message: Message):
+        """
+        Админская команда для удаления графика смен.
+        
+        Удаляет текущий файл графика из системы.
+        
+        Args:
+            client: Клиент Pyrogram
+            message: Сообщение пользователя
+        """
         user_id = message.from_user.id
         if user_id not in ADMIN_IDS:
             await message.reply("⛔️ Нет доступа")
@@ -95,11 +146,22 @@ def register_menu_handlers(app: Client):
 
     @app.on_callback_query(group=10)
     async def handle_callback(client: Client, callback_query: CallbackQuery):
+        """
+        Основной обработчик callback-запросов.
+        
+        Реализует всю логику навигации по меню, работу с разделами,
+        вложенными изображениями и системой поиска.
+        
+        Args:
+            client: Клиент Pyrogram
+            callback_query: Объект callback-запроса
+        """
         data = callback_query.data
         user_id = callback_query.from_user.id
         await callback_query.answer()
 
         try:
+            # Обработка пагинации разделов
             if data.startswith("sections_"):
                 try:
                     page = int(data.split("_")[1])
@@ -160,6 +222,7 @@ def register_menu_handlers(app: Client):
                 )
                 return
 
+            # Обработка открытия вложенных изображений
             elif data.startswith("show_photo_"):
                 parts = data.split("_")
                 sec_id = int(parts[2])
@@ -199,6 +262,7 @@ def register_menu_handlers(app: Client):
                 )
                 return
 
+            # Обработка просмотра раздела
             elif data.startswith("view_section_"):
                 section_id = int(data.split("_")[2])
 
@@ -261,6 +325,7 @@ def register_menu_handlers(app: Client):
                 )
                 return
 
+            # Обработка остальных callback-данных
             elif data == "open_checklists":
                 await callback_query.message.edit_text(
                     "📋 Чек-листы пока не добавлены.",
