@@ -107,26 +107,47 @@ def call_yandex_gpt_generate(messages, model_uri):
 
 # Функция для вызова генерации эмбеддингов (Yandex Embeddings) через REST API
 def call_yandex_embeddings(text):
+    # --- Добавляем проверки ---
+    if not text or not text.strip():
+        print(
+            f"Warning: Empty or whitespace-only text provided for embedding: '{text}'"
+        )
+        # Возвращаем нулевой вектор или вызываем ошибку, в зависимости от логики вашей системы
+        # В данном случае, можно вернуть вектор нулей подходящей размерности, например, 1024 для yandex embedding
+        # Или бросить исключение, чтобы пропустить этот чанк
+        # Пока бросим исключение, чтобы было видно в логах
+        raise ValueError("Текст для эмбеддинга пуст или содержит только пробелы")
+    # Проверка максимальной длины (примерный лимит, уточните в документации Yandex)
+    max_length = 2048  # Установим лимит, например, 2048 символов
+    if len(text) > max_length:
+        print(
+            f"Warning: Text length ({len(text)}) exceeds max length ({max_length}) for embedding. Truncating."
+        )
+        text = text[:max_length]  # Обрезаем до лимита
+
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Api-Key {auth_token}",
         # "Authorization": f"Bearer {IAM_TOKEN}", # Используйте этот заголовок, если используете IAM токен
     }
-    payload = {
-        # Используем URI модели эмбеддингов
-        # Примеры: "emb://<folder_id>/text-search-query/latest", "emb://<folder_id>/text-search-document/latest"
-        # Выберите подходящую задачу: query, document, etc.
-        "modelUri": f"emb://{FOLDER_ID}/text-search-document/latest",  # Или text-search-query/latest в зависимости от задачи
-        "text": text,
-    }
+    # Убедитесь, что FOLDER_ID подставляется правильно
+    model_uri = f"emb://{FOLDER_ID}/text-search-document/latest"
+    if not FOLDER_ID or "{FOLDER_ID}" in model_uri:  # Простая проверка подстановки
+        print(
+            f"Error: FOLDER_ID is not set or is invalid. Current value: '{FOLDER_ID}'. Model URI would be: '{model_uri}'"
+        )
+        raise ValueError("FOLDER_ID is not configured correctly.")
+    payload = {"modelUri": model_uri, "text": text}  # Используем переменную model_uri
 
-    # Указываем пустой словарь прокси
-    proxies = {}
+    proxies = {}  # Убедитесь, что прокси отключен
 
     try:
+        # print(f"Debug: Calling embedding API with payload: {payload}") # Для отладки, можно включить временно
         response = requests.post(url, headers=headers, json=payload, proxies=proxies)
-        response.raise_for_status()
+        # print(f"Debug: Raw response status: {response.status_code}") # Для отладки
+        # print(f"Debug: Raw response text: {response.text}") # Для отладки
+        response.raise_for_status()  # Возбуждает исключение для кодов ошибок HTTP
         data = response.json()
         # print(f"Debug: Embedding API response: {data}") # Для отладки
         # Путь к вектору: data['embedding']['values']
@@ -136,9 +157,12 @@ def call_yandex_embeddings(text):
             return np.asarray(embedding_values, dtype="float32")
         else:
             print(f"Warning: Could not find embedding values in API response: {data}")
-            raise ValueError("Не удалось получить вектор эмбеддинга из API")
+            raise ValueError(
+                "Не удалось получить вектор эмбеддинга из API (поле 'embedding.values' отсутствует или пусто)"
+            )
     except requests.exceptions.HTTPError as e:
-        print(f"HTTP Error for Embedding: {e.response.status_code}, {e.response.text}")
+        print(f"HTTP Error for Embedding: {e.response.status_code}")
+        print(f"Response Body: {e.response.text}")  # Вывод тела ответа ошибки
         raise e
     except requests.exceptions.RequestException as e:
         print(f"Request Error for Embedding: {e}")
