@@ -8,25 +8,8 @@ from pyrogram.types import (
     Message,
 )
 
-from yandex.cloud.ai.foundation_models.v1.text_generation.text_generation_service_pb2_grpc import (
-    TextGenerationServiceStub,
-)
-from yandex.cloud.ai.foundation_models.v1.text_generation.text_generation_service_pb2 import (
-    TextGenerationRequest,
-)
-from yandex.cloud.ai.foundation_models.v1.text_generation import token as token_pb
-from yandex.cloud.ai.foundation_models.v1 import text_generation_model_spec_pb2
-from yandex.cloud.ai.foundation_models.v1.text_embedding import (
-    text_embedding_service_pb2_grpc,
-    text_embedding_service_pb2,
-)
-from yandex.cloud.ai.foundation_models.v1.text_embedding.text_embedding_model_spec_pb2 import (
-    TextEmbeddingModelSpec,
-)
-from yandex.cloud.ai.foundation_models.v1.text_embedding.text_embedding_model_spec_pb2 import (
-    TextEmbeddingModelSpec as EmbeddingSpec,
-)
-import grpc
+# Заменяем импорт Gemini на вызовы Yandex GPT через requests
+import requests  # Импортируем requests
 from config import ADMIN_IDS
 from utils.ai_state import ai_state
 
@@ -34,96 +17,146 @@ DB_PATH = "data.db"
 CHUNK_SIZE = 1500  # символов
 TOP_K = 15  # сколько кусков отдаём в контекст
 
-API_KEY = os.getenv("YANDEX_API_KEY")
-FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")
+# ─────── 0. Инициализация Yandex GPT и Embeddings ───────
+# Необходимо установить переменные окружения YANDEX_API_KEY, YANDEX_FOLDER_ID
+# (или использовать IAM токен, как показано в следующем блоке)
+# Убедитесь, что у вас установлен пакет requests: pip install requests
 
+API_KEY = os.getenv("YANDEX_API_KEY")  # Убедитесь, что переменная установлена
+FOLDER_ID = os.getenv("YANDEX_FOLDER_ID")  # Убедитесь, что переменная установлена
 
-auth_token = API_KEY
+# Устанавливаем переменные для аутентификации (один из вариантов)
+auth_token = API_KEY  # используем API Key
 if not auth_token:
-    raise ValueError("Необходимо установить YANDEX_API_KEY или YANDEX_IAM_TOKEN")
+    raise ValueError("Необходимо установить YANDEX_API_KEY")
 if not FOLDER_ID:
     raise ValueError("Необходимо установить YANDEX_FOLDER_ID")
 
 
+# Функция для вызова генерации текста (Yandex GPT) через REST API
+# Функция для вызова генерации текста (Yandex GPT) через REST API
 def call_yandex_gpt_generate(messages, model_uri):
-    channel = grpc.insecure_channel(
-        "ai.api.cloud.yandex.net:443",
-        options=(("grpc.ssl_target_name_override", "ai.api.cloud.yandex.net"),),
-    )
-    call_credentials = grpc.access_token_call_credentials(auth_token)
-    channel_credentials = grpc.ssl_channel_credentials()
-    secure_channel = grpc.composite_channel_credentials(
-        channel_credentials, call_credentials
-    )
-    stub = TextGenerationServiceStub(
-        grpc.secure_channel("ai.api.cloud.yandex.net:443", secure_channel)
-    )
+    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Api-Key {auth_token}",
+        # "Authorization": f"Bearer {IAM_TOKEN}", # Используйте этот заголовок, если используете IAM токен
+    }
+    payload = {
+        "modelUri": model_uri,
+        "completionOptions": {
+            "stream": False,  # Не используем потоковую передачу
+            "temperature": 0.1,  # Настройте по необходимости
+            "maxTokens": "2000",  # Настройте по необходимости
+        },
+        "messages": [
+            {
+                "role": "user",
+                "text": messages,  # Передаем весь промпт как текст сообщения пользователя
+            }
+        ],
+    }
 
-    request = TextGenerationRequest(
-        model_uri=model_uri,
-        partial_results=True,
-        temperature=0.1,
-        text_generation_options=text_generation_model_spec_pb2.TextGenerationOptions(
-            temperature=0.1,
-        ),
-        text=messages,
-    )
+    # Указываем пустой словарь прокси
+    proxies = {}
 
     try:
-        response = stub.Generate(request)
-        if response.partial_results:
-            return response.partial_results[0].text
-        else:
-            if hasattr(response, "alternatives") and response.alternatives:
-                return response.alternatives[0].text
+        response = requests.post(url, headers=headers, json=payload, proxies=proxies)
+        response.raise_for_status()  # Возбуждает исключение для кодов ошибок HTTP
+        data = response.json()
+        # print(f"Debug: Full API response: {data}") # Для отладки
+        # Путь к тексту ответа может отличаться, проверьте структуру ответа API
+        # Обычно находится в data['result']['alternatives'][0]['message']['text']
+        # или data['alternatives'][0]['text']
+        # Пример структуры: {"result": {"alternatives": [{"message": {"role": "assistant", "text": "Ответ модели"}, "modelVersion": "..."}], "usage": {...}}}
+        # Или: {"alternatives": [{"text": "Ответ модели", "stop_reason": "..."}], "usage": {...}}
+        # Попробуем стандартный путь:
+        alternatives = data.get("result", {}).get("alternatives", []) or data.get(
+            "alternatives", []
+        )
+        if alternatives:
+            # Берем первый альтернативный ответ
+            first_alt = alternatives[0]
+            # Извлекаем текст из 'message' или напрямую из 'text'
+            text_response = first_alt.get("message", {}).get("text") or first_alt.get(
+                "text"
+            )
+            if text_response:
+                return text_response.strip()
             else:
-                print(
-                    f"Warning: No partial_results or alternatives found in response: {response}"
-                )
-                return "Не удалось получить ответ от модели."
-    except grpc.RpcError as e:
-        print(f"GRPC Error: {e.code()}, {e.details()}")
-        raise e
+                print(f"Warning: Could not find 'text' in alternative: {first_alt}")
+                return "Не удалось получить ответ от модели (ошибка структуры)."
+        else:
+            print(f"Warning: No alternatives found in API response: {data}")
+            return "Не удалось получить ответ от модели (нет альтернатив)."
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e.response.status_code}, {e.response.text}")
+        # Возвращаем сообщение об ошибке или вызываем исключение
+        error_detail = (
+            e.response.json().get("error", {}).get("message", "Неизвестная ошибка HTTP")
+        )
+        return f"Ошибка при обращении к Yandex GPT: {error_detail}"
+    except requests.exceptions.RequestException as e:
+        print(f"Request Error: {e}")
+        # Возвращаем сообщение об ошибке или вызываем исключение
+        return f"Ошибка при обращении к Yandex GPT: {str(e)}"
     except Exception as e:
-        print(f"General Error: {e}")
-        raise e
-    finally:
-        channel.close()
+        print(f"General Error during API call: {e}")
+        return f"Ошибка при обращении к Yandex GPT: {str(e)}"
 
 
+# Функция для вызова генерации эмбеддингов (Yandex Embeddings) через REST API
 def call_yandex_embeddings(text):
-    channel = grpc.insecure_channel(
-        "embeddings.api.cloud.yandex.net:443",
-        options=(("grpc.ssl_target_name_override", "embeddings.api.cloud.yandex.net"),),
-    )
-    call_credentials = grpc.access_token_call_credentials(auth_token)
-    channel_credentials = grpc.ssl_channel_credentials()
-    secure_channel = grpc.composite_channel_credentials(
-        channel_credentials, call_credentials
-    )
-    stub = text_embedding_service_pb2_grpc.TextEmbeddingServiceStub(
-        grpc.secure_channel("embeddings.api.cloud.yandex.net:443", secure_channel)
-    )
+    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Api-Key {auth_token}",
+        # "Authorization": f"Bearer {IAM_TOKEN}", # Используйте этот заголовок, если используете IAM токен
+    }
+    payload = {
+        # Используем URI модели эмбеддингов
+        # Примеры: "emb://<folder_id>/text-search-query/latest", "emb://<folder_id>/text-search-document/latest"
+        # Выберите подходящую задачу: query, document, etc.
+        "modelUri": f"emb://{FOLDER_ID}/text-search-document/latest",  # Или text-search-query/latest в зависимости от задачи
+        "text": text,
+    }
 
-    request = text_embedding_service_pb2.TextEmbeddingRequest(
-        model_uri=f"emb://{FOLDER_ID}/text-search-document/latest",
-        text=text,
-    )
+    # Указываем пустой словарь прокси
+    proxies = {}
 
     try:
-        response = stub.Embed(request)
-        return np.asarray(response.embedding.values, dtype="float32")
-    except grpc.RpcError as e:
-        print(f"GRPC Embedding Error: {e.code()}, {e.details()}")
+        response = requests.post(url, headers=headers, json=payload, proxies=proxies)
+        response.raise_for_status()
+        data = response.json()
+        # print(f"Debug: Embedding API response: {data}") # Для отладки
+        # Путь к вектору: data['embedding']['values']
+        embedding_values = data.get("embedding", {}).get("values")
+        if embedding_values and isinstance(embedding_values, list):
+            # print(f"Debug: Embedding vector (first 5 values): {embedding_values[:5]}...") # Для отладки
+            return np.asarray(embedding_values, dtype="float32")
+        else:
+            print(f"Warning: Could not find embedding values in API response: {data}")
+            raise ValueError("Не удалось получить вектор эмбеддинга из API")
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error for Embedding: {e.response.status_code}, {e.response.text}")
+        raise e
+    except requests.exceptions.RequestException as e:
+        print(f"Request Error for Embedding: {e}")
         raise e
     except Exception as e:
-        print(f"General Embedding Error: {e}")
+        print(f"General Error during Embedding API call: {e}")
         raise e
-    finally:
-        channel.close()
 
 
-CHAT_MODEL_URI = f"gpt://{FOLDER_ID}/yandexgpt/latest"
+# Модель для генерации (Yandex GPT)
+CHAT_MODEL_URI = f"gpt://{FOLDER_ID}/yandexgpt/latest"  # Или другая модель, например, /summarization/latest
+# Также можно использовать:
+# f"gpt://{FOLDER_ID}/yandexgpt-lite/latest" для более быстрой и дешевой модели
+# f"gpt://{FOLDER_ID}/prologue/latest" для диалоговых моделей (требует немного другой структуры сообщений)
+
+
+# --- Остальная часть вашего кода остается без изменений ---
+# (Все функции ниже остаются как есть, кроме embed и generate_answer)
 
 
 # ─────── 1. База данных для хранения состояния диалога ───────
@@ -156,6 +189,7 @@ def init_vector_table():
 
 # ─────── 2. Управление сессиями AI ───────
 def start_ai_session(user_id: int):
+    """Начать сессию AI для пользователя"""
     with db() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO ai_sessions (user_id, active) VALUES (?, 1)",
@@ -165,12 +199,14 @@ def start_ai_session(user_id: int):
 
 
 def end_ai_session(user_id: int):
+    """Завершить сессию AI для пользователя"""
     with db() as conn:
         conn.execute("UPDATE ai_sessions SET active = 0 WHERE user_id = ?", (user_id,))
         conn.commit()
 
 
 def is_ai_session_active(user_id: int) -> bool:
+    """Проверить, активна ли сессия AI для пользователя"""
     with db() as conn:
         result = conn.execute(
             "SELECT active FROM ai_sessions WHERE user_id = ? AND active = 1",
@@ -181,7 +217,13 @@ def is_ai_session_active(user_id: int) -> bool:
 
 # ─────── 3. Утилиты ───────
 def embed(text: str) -> np.ndarray:
+    """Вернуть эмбеддинг (float32[768]) для куска текста."""
+    # Заменяем вызов Gemini на Yandex через requests
     return call_yandex_embeddings(text)
+    # res = genai.embed_content(
+    #     model="models/embedding-001", content=text, task_type="retrieval_document"
+    # )
+    # return np.asarray(res["embedding"], dtype="float32")
 
 
 def chunk_text(text: str) -> list[str]:
@@ -194,6 +236,7 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 # ─────── 4. Индексация разделов ───────
 def full_reindex():
+    """Полностью пересоздать таблицу эмбеддингов (админ-команда)."""
     with db() as conn:
         conn.execute("DELETE FROM ai_chunks")
 
@@ -201,7 +244,7 @@ def full_reindex():
         for sid, title, content in rows:
             text = f"{title}\n{content}"
             for chunk in chunk_text(text):
-                vec = embed(chunk).tobytes()
+                vec = embed(chunk).tobytes()  # Вызов embed теперь использует Yandex
                 conn.execute(
                     "INSERT INTO ai_chunks(section_id, chunk, vector) VALUES(?,?,?)",
                     (sid, chunk, vec),
@@ -210,6 +253,7 @@ def full_reindex():
 
 
 def upsert_section(sid: int, title: str, content: str):
+    """Обновить эмбеддинги одного раздела (вызывайте из /add_section + /edit_section)."""
     with db() as conn:
         conn.execute("DELETE FROM ai_chunks WHERE section_id=?", (sid,))
         for chunk in chunk_text(f"{title}\n{content}"):
@@ -219,15 +263,16 @@ def upsert_section(sid: int, title: str, content: str):
                     sid,
                     chunk,
                     embed(chunk).tobytes(),
-                ),
+                ),  # Вызов embed теперь использует Yandex
             )
         conn.commit()
 
 
 # ─────── 5. Поиск ───────
 def retrieve_chunks(question: str, k: int = TOP_K) -> list[str]:
-    q_vec = embed(question)
+    q_vec = embed(question)  # Вызов embed теперь использует Yandex
     with db() as conn:
+        # многое хранится – читаем построчно
         scored: list[tuple[float, str]] = []
         for chunk, vec_blob in conn.execute("SELECT chunk, vector FROM ai_chunks"):
             v = np.frombuffer(vec_blob, dtype="float32")
@@ -251,9 +296,12 @@ def generate_answer(question: str) -> str:
 {question}
 
 === ОТВЕТ (на русском) ==="""
+    # Заменяем вызов Gemini на Yandex GPT через requests
     try:
+        # print(f"Debug: Prompt sent to Yandex GPT: {repr(prompt)}") # Для отладки
         resp_text = call_yandex_gpt_generate(prompt, CHAT_MODEL_URI)
-        return resp_text.strip()
+        # print(f"Debug: Raw response from Yandex GPT: {repr(resp_text)}") # Для отладки
+        return resp_text
     except Exception as e:
         print(f"Error generating answer with Yandex GPT: {e}")
         return "Извините, возникла ошибка при генерации ответа. Пожалуйста, попробуйте позже."
@@ -262,12 +310,14 @@ def generate_answer(question: str) -> str:
 # ─────── 7. Pyrogram-хендлеры ───────
 def register_ai_handlers(app: Client):
 
+    # Инициализация таблицы сессий
     init_ai_sessions_table()
 
+    # КНОПКА в меню ➜ callback «start_ai»
     @app.on_callback_query(filters.regex("^start_ai$"), group=20)
     async def start_ai(_, cq: CallbackQuery):
         uid = cq.from_user.id
-        start_ai_session(uid)
+        start_ai_session(uid)  # Активируем сессию
         await cq.message.edit_text(
             "🤖 AI-помощник активен! Введите ваш вопрос.\n"
             "Для выхода из режима AI нажмите кнопку 'Завершить диалог'.",
@@ -284,10 +334,11 @@ def register_ai_handlers(app: Client):
         )
         await cq.answer()
 
+    # Кнопка завершения диалога
     @app.on_callback_query(filters.regex("^stop_ai$"), group=20)
     async def stop_ai(_, cq: CallbackQuery):
         uid = cq.from_user.id
-        end_ai_session(uid)
+        end_ai_session(uid)  # Завершаем сессию
         await cq.message.edit_text(
             "✅ Диалог с AI-помощником завершен.",
             reply_markup=InlineKeyboardMarkup(
@@ -299,6 +350,7 @@ def register_ai_handlers(app: Client):
         )
         await cq.answer()
 
+    # Обычное текст-сообщение от пользователя с активной AI сессией
     @app.on_message(
         filters.text
         & filters.private
@@ -308,6 +360,7 @@ def register_ai_handlers(app: Client):
     async def handle_ai_question(_, msg: Message):
         uid = msg.from_user.id
 
+        # Если пользователь хочет выйти
         if msg.text.strip().lower() in ["/stop", "/exit", "стоп", "выход"]:
             end_ai_session(uid)
             await msg.reply(
@@ -330,16 +383,17 @@ def register_ai_handlers(app: Client):
             return
 
         question = msg.text.strip()
-        thinking_msg = await msg.reply("⏳ Думаю…")
+        thinking_msg = await msg.reply("⏳ Думаю…")  # ← индикатор
 
         try:
             answer = generate_answer(question)
         finally:
             try:
-                await thinking_msg.delete()
+                await thinking_msg.delete()  # ← удаляем
             except Exception:
                 pass
 
+        # Отправляем ответ и предлагаем продолжить диалог
         await msg.reply(
             answer,
             reply_markup=InlineKeyboardMarkup(
@@ -354,6 +408,7 @@ def register_ai_handlers(app: Client):
             ),
         )
 
+    # /reindex_ai  (только для админов)
     @app.on_message(filters.command("reindex_ai") & filters.private, group=15)
     async def reindex_cmd(_, m: Message):
         if m.from_user.id not in ADMIN_IDS:
