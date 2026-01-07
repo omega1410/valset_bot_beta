@@ -13,6 +13,7 @@ def register_help_handler(app: Client):
             "/help": "Показать это сообщение",
             "/stats": "Посмотреть статистику",
             "/feedback": "Отправить фидбэк",
+            "/free_ai": "команда для ИИ-бота"
         }
 
         admin_commands = {

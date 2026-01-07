@@ -13,7 +13,6 @@ DB_PATH = "data.db"
 
 HARDCODED_ADMINS = {
     5669245603,
-    551125461,
     655805086,
 }
 

@@ -112,68 +112,181 @@ def call_yandex_embeddings(text):
         print(
             f"Warning: Empty or whitespace-only text provided for embedding: '{text}'"
         )
-        # Возвращаем нулевой вектор или вызываем ошибку, в зависимости от логики вашей системы
-        # В данном случае, можно вернуть вектор нулей подходящей размерности, например, 1024 для yandex embedding
-        # Или бросить исключение, чтобы пропустить этот чанк
-        # Пока бросим исключение, чтобы было видно в логах
         raise ValueError("Текст для эмбеддинга пуст или содержит только пробелы")
-    # Проверка максимальной длины (примерный лимит, уточните в документации Yandex)
-    max_length = 2048  # Установим лимит, например, 2048 символов
+
+    max_length = 2048
     if len(text) > max_length:
         print(
             f"Warning: Text length ({len(text)}) exceeds max length ({max_length}) for embedding. Truncating."
         )
-        text = text[:max_length]  # Обрезаем до лимита
+        text = text[:max_length]
 
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/textEmbedding"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Api-Key {auth_token}",
-        # "Authorization": f"Bearer {IAM_TOKEN}", # Используйте этот заголовок, если используете IAM токен
     }
-    # Убедитесь, что FOLDER_ID подставляется правильно
-    model_uri = f"emb://{FOLDER_ID}/text-search-document/latest"
-    if not FOLDER_ID or "{FOLDER_ID}" in model_uri:  # Простая проверка подстановки
-        print(
-            f"Error: FOLDER_ID is not set or is invalid. Current value: '{FOLDER_ID}'. Model URI would be: '{model_uri}'"
-        )
-        raise ValueError("FOLDER_ID is not configured correctly.")
-    payload = {"modelUri": model_uri, "text": text}  # Используем переменную model_uri
 
-    proxies = {}  # Убедитесь, что прокси отключен
+    # ДЛЯ ОТЛАДКИ: Показываем что отправляем
+    print(f"DEBUG call_yandex_embeddings: FOLDER_ID = {FOLDER_ID}")
+
+    # Пробуем text-search-query (для поисковых запросов)
+    model_uri = f"emb://{FOLDER_ID}/text-search-query/latest"
+    payload = {"modelUri": model_uri, "text": text}
+
+    print(f"DEBUG: Sending to {url}")
+    print(f"DEBUG: Model URI: {model_uri}")
+    print(f"DEBUG: Text sample: {text[:100]}...")
 
     try:
-        # print(f"Debug: Calling embedding API with payload: {payload}") # Для отладки, можно включить временно
-        response = requests.post(url, headers=headers, json=payload, proxies=proxies)
-        # print(f"Debug: Raw response status: {response.status_code}") # Для отладки
-        # print(f"Debug: Raw response text: {response.text}") # Для отладки
-        response.raise_for_status()  # Возбуждает исключение для кодов ошибок HTTP
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+
+        print(f"DEBUG: Response status: {response.status_code}")
+        print(f"DEBUG: Response headers: {response.headers}")
+
+        # Сначала посмотрим сырой ответ
+        raw_response = response.text
+        print(f"DEBUG: Raw response (first 500 chars): {raw_response[:500]}")
+
+        response.raise_for_status()
         data = response.json()
-        # print(f"Debug: Embedding API response: {data}") # Для отладки
-        # Путь к вектору: data['embedding']['values']
-        embedding_values = data.get("embedding", {}).get("values")
+
+        # ВАЖНОЕ ИСПРАВЛЕНИЕ: Yandex API возвращает данные в неожиданном формате
+        print(
+            f"DEBUG: Parsed JSON type: {type(data)}, content keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}"
+        )
+
+        # Обрабатываем разные форматы ответа
+        embedding_values = None
+
+        # Вариант 1: data уже содержит embedding как список напрямую
+        if isinstance(data, list):
+            print(f"DEBUG: Response is a list with {len(data)} elements")
+            if len(data) > 0 and isinstance(data[0], dict):
+                # Может быть [{"embedding": {...}}] или [{"values": [...]}]
+                first_item = data[0]
+                if "embedding" in first_item:
+                    embedding_data = first_item["embedding"]
+                elif "values" in first_item:
+                    embedding_data = {"values": first_item["values"]}
+                else:
+                    embedding_data = first_item
+
+                if isinstance(embedding_data, dict):
+                    embedding_values = embedding_data.get("values")
+                elif isinstance(embedding_data, list):
+                    embedding_values = embedding_data
+            else:
+                # Возможно, data уже список значений
+                embedding_values = data
+
+        # Вариант 2: data - словарь с embedding
+        elif isinstance(data, dict):
+            print(f"DEBUG: Response is a dict with keys: {data.keys()}")
+
+            # Прямой доступ к values
+            if "values" in data:
+                embedding_values = data["values"]
+            # Или через embedding
+            elif "embedding" in data:
+                embedding = data["embedding"]
+                if isinstance(embedding, dict):
+                    embedding_values = embedding.get("values")
+                elif isinstance(embedding, list):
+                    embedding_values = embedding
+
+        # Проверяем, что получили значения
         if embedding_values and isinstance(embedding_values, list):
-            # print(f"Debug: Embedding vector (first 5 values): {embedding_values[:5]}...") # Для отладки
+            print(
+                f"DEBUG: Success! Got embedding vector with {len(embedding_values)} dimensions"
+            )
+            print(f"DEBUG: First 5 values: {embedding_values[:5]}")
             return np.asarray(embedding_values, dtype="float32")
         else:
-            print(f"Warning: Could not find embedding values in API response: {data}")
-            raise ValueError(
-                "Не удалось получить вектор эмбеддинга из API (поле 'embedding.values' отсутствует или пусто)"
+            print(
+                f"ERROR: Could not extract embedding values. Full response structure:"
             )
+            print(f"Full data: {data}")
+
+            # Попробуем пройти по структуре рекурсивно
+            def find_values(obj, path=""):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k == "values" and isinstance(v, list):
+                            print(f"Found 'values' at path: {path}.{k}")
+                            return v
+                        elif isinstance(v, (dict, list)):
+                            result = find_values(v, f"{path}.{k}")
+                            if result:
+                                return result
+                elif isinstance(obj, list) and len(obj) > 0:
+                    for i, item in enumerate(obj):
+                        if isinstance(item, (dict, list)):
+                            result = find_values(item, f"{path}[{i}]")
+                            if result:
+                                return result
+                return None
+
+            found_values = find_values(data, "root")
+            if found_values:
+                print(
+                    f"DEBUG: Found values recursively: {len(found_values)} dimensions"
+                )
+                return np.asarray(found_values, dtype="float32")
+
+            raise ValueError(
+                f"Не удалось получить вектор эмбеддинга. Структура ответа: {data}"
+            )
+
     except requests.exceptions.HTTPError as e:
-        print(f"HTTP Error for Embedding: {e.response.status_code}")
-        print(f"Response Body: {e.response.text}")  # Вывод тела ответа ошибки
-        raise e
-    except requests.exceptions.RequestException as e:
-        print(f"Request Error for Embedding: {e}")
+        print(f"HTTP Error {e.response.status_code} for Embedding API")
+        print(f"Request URL: {url}")
+        print(f"Request payload: {payload}")
+        print(f"Response body: {e.response.text[:500]}")
+
+        # Попробуем с другим model_uri
+        print("Trying with text-search-document model...")
+        try:
+            alt_payload = payload.copy()
+            alt_payload["modelUri"] = f"emb://{FOLDER_ID}/text-search-document/latest"
+            print(f"DEBUG: Alternative payload: {alt_payload}")
+
+            alt_response = requests.post(
+                url, headers=headers, json=alt_payload, timeout=30
+            )
+            alt_response.raise_for_status()
+            alt_data = alt_response.json()
+
+            print(f"DEBUG: Alternative response: {alt_data}")
+
+            # Простая логика: если это список, берем первый элемент
+            if isinstance(alt_data, list) and len(alt_data) > 0:
+                alt_data = alt_data[0]
+
+            # Прямой доступ к значениям
+            if isinstance(alt_data, dict) and "embedding" in alt_data:
+                embedding = alt_data["embedding"]
+                if isinstance(embedding, dict):
+                    values = embedding.get("values")
+                elif isinstance(embedding, list):
+                    values = embedding
+
+                if values and isinstance(values, list):
+                    return np.asarray(values, dtype="float32")
+
+        except Exception as alt_e:
+            print(f"Alternative model also failed: {alt_e}")
+
         raise e
     except Exception as e:
         print(f"General Error during Embedding API call: {e}")
+        print(f"Request was to: {url}")
+        print(f"Payload was: {payload}")
         raise e
 
 
 # Модель для генерации (Yandex GPT)
-CHAT_MODEL_URI = f"gpt://{FOLDER_ID}/yandexgpt/latest"  # Или другая модель, например, /summarization/latest
+CHAT_MODEL_URI = f"gpt://{FOLDER_ID}/yandexgpt-4-lite/latest"  # Или другая модель, например, /summarization/latest
 # Также можно использовать:
 # f"gpt://{FOLDER_ID}/yandexgpt-lite/latest" для более быстрой и дешевой модели
 # f"gpt://{FOLDER_ID}/prologue/latest" для диалоговых моделей (требует немного другой структуры сообщений)
@@ -186,14 +299,23 @@ CHAT_MODEL_URI = f"gpt://{FOLDER_ID}/yandexgpt/latest"  # Или другая м
 # ─────── 1. База данных для хранения состояния диалога ───────
 def init_ai_sessions_table():
     with db() as conn:
+        # Создаем таблицу если её нет
         conn.execute(
             """CREATE TABLE IF NOT EXISTS ai_sessions(
                    user_id     INTEGER PRIMARY KEY,
                    active      BOOLEAN DEFAULT 1,
+                   mode        TEXT DEFAULT 'rag',
                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                )"""
         )
-
+        
+        # Добавляем колонку mode если её нет
+        try:
+            conn.execute("ALTER TABLE ai_sessions ADD COLUMN mode TEXT DEFAULT 'rag'")
+        except sqlite3.OperationalError:
+            # Колонка уже существует - это нормально
+            pass
+        conn.commit()
 
 def db() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
@@ -212,14 +334,23 @@ def init_vector_table():
 
 
 # ─────── 2. Управление сессиями AI ───────
-def start_ai_session(user_id: int):
+def start_ai_session(user_id: int, mode: str = "rag"):
     """Начать сессию AI для пользователя"""
     with db() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO ai_sessions (user_id, active) VALUES (?, 1)",
-            (user_id,),
+            "INSERT OR REPLACE INTO ai_sessions (user_id, active, mode) VALUES (?, 1, ?)",
+            (user_id, mode),
         )
         conn.commit()
+
+
+def get_ai_session_mode(user_id: int) -> str:
+    """Получить режим AI сессии"""
+    with db() as conn:
+        result = conn.execute(
+            "SELECT mode FROM ai_sessions WHERE user_id = ? AND active = 1", (user_id,)
+        ).fetchone()
+        return result[0] if result else "rag"
 
 
 def end_ai_session(user_id: int):
@@ -308,27 +439,74 @@ def retrieve_chunks(question: str, k: int = TOP_K) -> list[str]:
 
 # ─────── 6. Генерация ответа ───────
 def generate_answer(question: str) -> str:
-    ctx = "\n\n".join(retrieve_chunks(question))
-    prompt = f"""Ты — ассистент сотрудников стойки регистрации.
-Отвечай строго на основе КОНТЕКСТА.
-Если информации недостаточно — ответь "Не знаю".
+    # Получаем релевантные чанки
+    ctx_chunks = retrieve_chunks(question)
 
-=== КОНТЕКСТ ===
+    # Если нет релевантных чанков
+    if not ctx_chunks:
+        return "Не знаю. Информация по данному вопросу отсутствует в базе знаний."
+
+    ctx = "\n\n".join(ctx_chunks)
+
+    # СТРОГИЙ промпт для RAG
+    prompt = f"""Ты — ассистент сотрудников отеля, отвечающий ТОЛЬКО на основе предоставленной базы знаний.
+
+ИСПОЛЬЗУЙ ТОЛЬКО ЭТУ ИНФОРМАЦИЮ:
 {ctx}
 
-=== ВОПРОС ===
-{question}
+ВОПРОС: {question}
 
-=== ОТВЕТ (на русском) ==="""
-    # Заменяем вызов Gemini на Yandex GPT через requests
+ПРАВИЛА:
+1. Ответь ТОЛЬКО если точный ответ есть в информации выше
+2. Если ответа нет - скажи "Не знаю"
+3. НЕ добавляй информацию из своих знаний
+4. НЕ объясняй почему не знаешь
+5. Будь кратким
+
+ОТВЕТ:"""
+
     try:
-        # print(f"Debug: Prompt sent to Yandex GPT: {repr(prompt)}") # Для отладки
-        resp_text = call_yandex_gpt_generate(prompt, CHAT_MODEL_URI)
-        # print(f"Debug: Raw response from Yandex GPT: {repr(resp_text)}") # Для отладки
-        return resp_text
+        answer = call_yandex_gpt_generate(prompt, CHAT_MODEL_URI)
+
+        # Дополнительная проверка - если ответ слишком общий
+        vague_phrases = [
+            "в общем",
+            "обычно",
+            "как правило",
+            "согласно общим правилам",
+            "в большинстве случаев",
+        ]
+        if any(phrase in answer.lower() for phrase in vague_phrases):
+            return "Не знаю"
+
+        # Если ответ не содержит полезной информации
+        if len(answer.strip()) < 10 or "не знаю" not in answer.lower():
+            # Проверяем, есть ли в ответе реальная информация
+            return answer
+
+        return "Не знаю"
     except Exception as e:
-        print(f"Error generating answer with Yandex GPT: {e}")
-        return "Извините, возникла ошибка при генерации ответа. Пожалуйста, попробуйте позже."
+        print(f"Error in generate_answer: {e}")
+        return "Не знаю"
+
+
+def generate_free_answer(question: str) -> str:
+    """Генерация ответа без ограничений БД - обычный ИИ-бот"""
+    # Простой промпт без контекста БД
+    prompt = f"""Ты — полезный AI-ассистент для сотрудников отеля.
+Отвечай на вопросы максимально полезно и информативно.
+Будь вежливым и профессиональным.
+
+Вопрос пользователя: {question}
+
+Полезный и развернутый ответ:"""
+
+    try:
+        answer = call_yandex_gpt_generate(prompt, CHAT_MODEL_URI)
+        return answer
+    except Exception as e:
+        print(f"Error in generate_free_answer: {e}")
+        return "Извините, произошла ошибка при генерации ответа."
 
 
 # ─────── 7. Pyrogram-хендлеры ───────
@@ -375,6 +553,7 @@ def register_ai_handlers(app: Client):
         await cq.answer()
 
     # Обычное текст-сообщение от пользователя с активной AI сессией
+
     @app.on_message(
         filters.text
         & filters.private
@@ -384,47 +563,63 @@ def register_ai_handlers(app: Client):
     async def handle_ai_question(_, msg: Message):
         uid = msg.from_user.id
 
+        # Определяем режим (rag или free)
+        mode = get_ai_session_mode(uid)
+
         # Если пользователь хочет выйти
         if msg.text.strip().lower() in ["/stop", "/exit", "стоп", "выход"]:
             end_ai_session(uid)
-            await msg.reply(
-                "✅ Диалог с AI-помощником завершен.",
-                reply_markup=InlineKeyboardMarkup(
+            keyboard = InlineKeyboardMarkup(
+                [
                     [
-                        [
-                            InlineKeyboardButton(
-                                "🤖 AI-помощник", callback_data="start_ai"
-                            )
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                "🔙 Назад", callback_data="back_to_main"
-                            )
-                        ],
-                    ]
-                ),
+                        InlineKeyboardButton("🤖 AI по БД", callback_data="start_ai"),
+                        InlineKeyboardButton(
+                            "🧠 Общий AI", callback_data="free_ai_menu"
+                        ),
+                    ],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")],
+                ]
             )
+            await msg.reply("✅ Диалог завершен.", reply_markup=keyboard)
             return
 
         question = msg.text.strip()
-        thinking_msg = await msg.reply("⏳ Думаю…")  # ← индикатор
+        thinking_msg = await msg.reply("⏳ Думаю…")
 
         try:
-            answer = generate_answer(question)
+            # В зависимости от режима
+            if mode == "rag":
+                answer = generate_answer(question)  # AI по БД
+                mode_text = "🤖 AI по БД"
+            else:
+                answer = generate_free_answer(question)  # Общий AI
+                mode_text = "🧠 Общий AI"
         finally:
             try:
-                await thinking_msg.delete()  # ← удаляем
+                await thinking_msg.delete()
             except Exception:
                 pass
 
-        # Отправляем ответ и предлагаем продолжить диалог
+        # Отправляем ответ
         await msg.reply(
             answer,
             reply_markup=InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "⏹ Завершить диалог", callback_data="stop_ai"
+                            f"⏹ Завершить ({mode_text})", callback_data="stop_ai"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            (
+                                "🤖 Перейти к AI по БД"
+                                if mode == "free"
+                                else "🧠 Перейти к общему AI"
+                            ),
+                            callback_data=(
+                                "start_ai" if mode == "free" else "free_ai_menu"
+                            ),
                         )
                     ],
                     [InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")],
@@ -441,3 +636,112 @@ def register_ai_handlers(app: Client):
         await m.reply("🔄 Пересчитываю эмбеддинги (это может занять время)...")
         full_reindex()
         await m.reply("✅ Готово!")
+
+    @app.on_message(filters.command("free_ai") & filters.private, group=22)
+    async def free_ai_cmd(client, m: Message):
+        """Быстрый доступ к обычному ИИ (без БД)"""
+        if len(m.text.split()) > 1:
+            # Пользователь написал вопрос сразу: /free_ai Как погода?
+            question = " ".join(m.text.split()[1:])
+            thinking = await m.reply("🧠 Думаю над ответом...")
+
+            try:
+                answer = generate_free_answer(question)
+                await thinking.delete()
+                await m.reply(
+                    f"<b>🧠 Общий AI-ответ:</b>\n\n{answer}",
+                    reply_markup=InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "🤖 Перейти к AI по БД", callback_data="start_ai"
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    "🔙 Назад", callback_data="back_to_main"
+                                )
+                            ],
+                        ]
+                    ),
+                )
+            except Exception as e:
+                await thinking.delete()
+                await m.reply(f"⚠️ Ошибка: {str(e)}")
+        else:
+            # Пользователь просто написал /free_ai без вопроса
+            await m.reply(
+                "🧠 <b>Общий AI-чат</b>\n\n"
+                "Я могу ответить на любые вопросы, не ограничиваясь базой данных.\n\n"
+                "<b>Использование:</b>\n"
+                "• Напишите вопрос сразу: <code>/free_ai Как погода в Москве?</code>\n"
+                "• Или просто напишите <code>/free_ai</code> и затем задайте вопрос\n\n"
+                "<b>Режимы работы:</b>\n"
+                "• 🤖 <b>AI по БД</b> - только информация из базы знаний\n"
+                "• 🧠 <b>Общий AI</b> - любые вопросы",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "🤖 AI по базе данных", callback_data="start_ai"
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                "🔙 Назад", callback_data="back_to_main"
+                            )
+                        ],
+                    ]
+                ),
+            )
+
+    @app.on_callback_query(filters.regex("^free_ai_menu$"), group=20)
+    async def free_ai_menu_callback(_, cq: CallbackQuery):
+        """Кнопка 'Общий AI' в меню"""
+        uid = cq.from_user.id
+        start_ai_session(uid, "free")  # Запускаем сессию в режиме 'free'
+
+        await cq.message.edit_text(
+            "🧠 <b>Общий AI-чат активирован!</b>\n\n"
+            "Теперь я буду отвечать на <b>любые ваши вопросы</b>.\n"
+            "Просто напишите ваш вопрос в чат.\n\n"
+            "<b>Примеры вопросов:</b>\n"
+            "• Что такое искусственный интеллект?\n"
+            "• Как улучшить работу ресепшена?\n"
+            "• Расскажи интересный факт\n\n"
+            "Для выхода нажмите кнопку ниже.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "⏹ Завершить общий чат", callback_data="stop_ai"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "🤖 Перейти к AI по БД", callback_data="start_ai"
+                        )
+                    ],
+                    [InlineKeyboardButton("🔙 В меню", callback_data="back_to_main")],
+                ]
+            ),
+        )
+        await cq.answer()
+
+    @app.on_callback_query(filters.regex("^ask_free_ai$"), group=20)
+    async def ask_free_ai_callback(_, cq: CallbackQuery):
+        """Кнопка 'Задать вопрос'"""
+        await cq.message.edit_text(
+            "🧠 <b>Задайте ваш вопрос:</b>\n\n"
+            "Просто <b>напишите вопрос в чат</b>.\n\n"
+            "Или используйте команду:\n"
+            "<code>/free_ai ваш вопрос</code>\n\n"
+            "<i>Например: 'Какие есть лайфхаки для работы?'</i>",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🔙 Назад", callback_data="free_ai_menu")],
+                    [InlineKeyboardButton("🏠 В меню", callback_data="back_to_main")],
+                ]
+            ),
+        )
+        await cq.answer()

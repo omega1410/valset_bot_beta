@@ -1,7 +1,12 @@
 import logging
 import os
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 from dotenv import load_dotenv
 from handlers.feedback import register_feedback_handlers
 
@@ -18,6 +23,7 @@ from handlers import ai_assistant
 from handlers.logbook import register_logbook
 from utils.states import user_states
 from handlers.cancel import register_cancel_handler
+from handlers.ai_assistant import generate_free_answer
 
 logging.basicConfig(level=logging.INFO)
 
