@@ -8,6 +8,7 @@ from pyrogram.types import (
 from db.statistics import get_user_stats
 import sqlite3
 import asyncio
+from db_config import DB_PATH
 
 tests = {
     1: [
@@ -627,7 +628,7 @@ async def send_question(client: Client, chat_id: int, user_id: int):
 
 async def save_test_stats(user_id: int, section_id: int, correct: int, total: int):
     try:
-        conn = sqlite3.connect("db/data.db")
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
             """
@@ -699,7 +700,7 @@ def generate_test_button(section_id: int):
 
 def get_user_stats(user_id: int):
     try:
-        conn = sqlite3.connect("db/data.db")
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
             """

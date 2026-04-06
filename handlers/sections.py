@@ -1,3 +1,4 @@
+import os
 from pyrogram import Client, filters
 from pyrogram.types import (
     Message,
@@ -11,6 +12,7 @@ import logging
 from config import ADMIN_IDS
 from utils.whitelist import is_admin
 from pyrogram.enums import ParseMode
+from db_config import DB_PATH
 
 admin_filter = filters.create(lambda _, __, m: is_admin(m.from_user.id))
 
@@ -82,7 +84,7 @@ def register_section_handlers(app: Client):
                 return
 
             try:
-                conn = sqlite3.connect("data.db")
+                conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute(
                     "INSERT INTO sections (title, content) VALUES (?, ?)",
@@ -109,7 +111,7 @@ def register_section_handlers(app: Client):
             await message.reply("⛔️ Нет доступа")
             return
 
-        conn = sqlite3.connect("data.db")
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("SELECT id, title FROM sections")
         sections = c.fetchall()
@@ -161,7 +163,7 @@ def register_section_handlers(app: Client):
             section_id = pending_edit_section[user_id]
 
             try:
-                conn = sqlite3.connect("data.db")
+                conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute(
                     "UPDATE sections SET title=?, content=? WHERE id=?",
@@ -190,32 +192,36 @@ def register_section_handlers(app: Client):
         except (IndexError, ValueError):
             await message.reply(
                 "ℹ️ Использование:\n"
-                "1) пришлите фото\n"
-                "2) ответом: /set_photo <ID_раздела> [<1-7>]"
+                "/set_photo <ID_раздела> <номер_слота> <имя_файла>\n\n"
+                "Пример: /set_photo 1 1 photo.png"
             )
             return
 
-        column = "photo_id" if slot == 1 else f"photo_id{slot}"
+        # Получаем имя файла из команды
+        if len(message.command) < 4:
+            await message.reply("❌ Укажите имя файла: /set_photo 1 1 photo.png")
+            return
 
-        photo = (
-            message.reply_to_message.photo
-            if message.reply_to_message and message.reply_to_message.photo
-            else message.photo
-        )
-        if not photo:
+        filename = message.command[3]
+
+        # Проверяем, существует ли файл в папке assets
+        file_path = f"assets/{filename}"
+        if not os.path.exists(file_path):
             await message.reply(
-                "❗️Команда должна быть в ответ на фото " "или в подписи к фото."
+                f"❌ Файл {filename} не найден в папке assets\n\n"
+                f"Доступные файлы:\n{', '.join(os.listdir('assets'))}"
             )
             return
 
-        file_id = photo.file_id
-        column = "photo_id" if slot == 1 else f"photo_id{slot}"
+    column = "photo_id" if slot == 1 else f"photo_id{slot}"
 
-        with sqlite3.connect("data.db") as conn:
-            conn.execute(
-                f"UPDATE sections SET {column}=? WHERE id=?", (file_id, section_id)
-            )
-        await message.reply(f"✅ Фото сохранено в слот {slot} для раздела {section_id}")
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f"UPDATE sections SET {column}=? WHERE id=?", (filename, section_id)
+        )
+    await message.reply(
+        f"✅ Фото {filename} привязано к разделу {section_id}, слот {slot}"
+    )
 
     @app.on_message(filters.command("remove_photo") & admin_filter, group=0)
     async def cmd_remove_photo(client, message):
@@ -228,7 +234,7 @@ def register_section_handlers(app: Client):
             await message.reply("ℹ️ Использование: /remove_photo <ID_раздела> [<1-7>]")
             return
         column = "photo_id" if slot == 1 else f"photo_id{slot}"
-        with sqlite3.connect("data.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
                 f"UPDATE sections SET {column}=NULL WHERE id=?", (section_id,)
             )
@@ -240,7 +246,7 @@ def register_section_handlers(app: Client):
         args = message.command
 
         if len(args) == 1:
-            with sqlite3.connect("data.db") as conn:
+            with sqlite3.connect(DB_PATH) as conn:
                 rows = conn.execute("SELECT id, title FROM sections").fetchall()
 
             if not rows:
@@ -266,7 +272,7 @@ def register_section_handlers(app: Client):
         client: Client, message: Message, section_id: int
     ):
         """Показать раздел с опцией перехода в карусель"""
-        with sqlite3.connect("data.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
                 """
                 SELECT title, content,
@@ -342,7 +348,7 @@ def register_section_handlers(app: Client):
 
     @app.on_callback_query(filters.regex(r"^back_to_sections$"))
     async def back_to_sections(client: Client, callback_query: CallbackQuery):
-        with sqlite3.connect("data.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             rows = conn.execute("SELECT id, title FROM sections").fetchall()
 
         if not rows:
@@ -360,7 +366,7 @@ def register_section_handlers(app: Client):
         client: Client, message: Message, section_id: int, photo_index: int
     ):
         """Показать фото из карусели с навигационными кнопками"""
-        with sqlite3.connect("data.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
                 """
                 SELECT title,
@@ -394,7 +400,6 @@ def register_section_handlers(app: Client):
         keyboard = []
         nav_row = []
 
-        # Кнопка "Назад" (если не первое фото)
         if photo_index > 0:
             nav_row.append(
                 InlineKeyboardButton(
@@ -402,14 +407,12 @@ def register_section_handlers(app: Client):
                 )
             )
 
-        # Индикатор текущей позиции
         nav_row.append(
             InlineKeyboardButton(
                 f"{photo_index + 1}/{len(photos)}", callback_data="carousel_info"
             )
         )
 
-        # Кнопка "Вперед" (если не последнее фото)
         if photo_index < len(photos) - 1:
             nav_row.append(
                 InlineKeyboardButton(
@@ -421,7 +424,6 @@ def register_section_handlers(app: Client):
         if nav_row:
             keyboard.append(nav_row)
 
-        # Кнопка "Назад в раздел"
         keyboard.append(
             [
                 InlineKeyboardButton(
@@ -430,28 +432,27 @@ def register_section_handlers(app: Client):
             ]
         )
 
-        # Отправляем фото с подписью и кнопками
+        # 👇 ГЛАВНОЕ ИЗМЕНЕНИЕ: читаем фото из папки assets
+        photo_path = f"assets/{photos[photo_index]}"
+        if not os.path.exists(photo_path):
+            await message.edit_text(
+                f"⚠️ Файл {photos[photo_index]} не найден в папке assets"
+            )
+            return
+
         caption = f"<b>{title}</b>\n\nФото {photo_index + 1} из {len(photos)}"
 
         try:
-            await message.edit_media(
-                InputMediaPhoto(
-                    photos[photo_index], caption=caption, parse_mode=ParseMode.HTML
-                ),
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+            await message.delete()
         except:
-            # Если edit_media не работает, отправляем новое сообщение
-            try:
-                await message.delete()
-            except:
-                pass
-            await message.reply_photo(
-                photo=photos[photo_index],
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+            pass
+
+        await message.reply_photo(
+            photo=photo_path,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
 
     @app.on_callback_query(filters.regex(r"^carousel_prev_(\d+)_(\d+)$"))
     async def carousel_prev(client: Client, callback_query: CallbackQuery):
@@ -473,7 +474,7 @@ def register_section_handlers(app: Client):
         current_index = int(match.group(2))
 
         # Проверяем, есть ли следующее фото
-        with sqlite3.connect("data.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
                 """
                 SELECT COALESCE(photo_id,  ''), COALESCE(photo_id2, ''), COALESCE(photo_id3, ''),

@@ -2,13 +2,12 @@ import sqlite3
 from typing import Optional, List, Tuple, Dict, Any
 import logging
 from contextlib import contextmanager
+from db_config import DB_PATH
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-DB_PATH = "db/data.db"
 
 
 @contextmanager
@@ -121,7 +120,7 @@ def save_test_result(user_id: int, section_id: int, correct: int, total: int) ->
     except Exception as e:
         logger.error(f"Ошибка сохранения результатов: {e}")
         return False
-    
+
     def get_connection():
         conn = sqlite3.connect(
             DB_PATH,
@@ -133,4 +132,3 @@ def save_test_result(user_id: int, section_id: int, correct: int, total: int) ->
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
-    
